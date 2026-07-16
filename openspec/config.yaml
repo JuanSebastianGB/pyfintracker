@@ -1,0 +1,43 @@
+context: |
+  pyfintracker is a personal finance CLI written in Python.
+  Strict double-entry bookkeeping, SQLite storage, multi-currency (COP default).
+  Local-first, no cloud, no telemetry.
+  Audience: solo developer use, Latin-American focused.
+  Delivery: 4-wave phased rollout (MVP, multi-currency, productivity, import/export).
+
+strict_tdd: enabled
+
+testing_capabilities:
+  runner: pytest
+  frameworks:
+    - pytest
+    - pytest-cov
+    - hypothesis (property-based)
+    - syrupy (snapshot)
+  layers:
+    unit: true
+    integration: true
+    e2e: false
+    property_based: true
+    snapshot: true
+  coverage_threshold: 70
+
+phases:
+  proposal:
+    artifact: openspec/changes/{name}/proposal.md
+    requires: []
+  spec:
+    artifact: openspec/changes/{name}/spec.md
+    requires: [proposal]
+  design:
+    artifact: openspec/changes/{name}/design.md
+    requires: [spec]
+  tasks:
+    artifact: openspec/changes/{name}/tasks.md
+    requires: [design]
+  apply:
+    requires: [tasks]
+  verify:
+    requires: [apply]
+  archive:
+    requires: [verify]
