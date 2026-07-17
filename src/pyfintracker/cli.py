@@ -5,6 +5,8 @@ from __future__ import annotations
 from importlib.metadata import version as pkg_version
 
 import typer
+from rich.console import Console
+from rich.table import Table
 from sqlalchemy import Engine
 
 from pyfintracker.config import load_settings, source_of
@@ -25,6 +27,19 @@ def _main(ctx: typer.Context) -> None:
     # If no subcommand is given, show help
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
+
+
+# ── Account sub-app ──────────────────────────────────────────────────────────
+
+
+account_app = typer.Typer(help="Manage accounts.")
+app.add_typer(account_app, name="account")
+
+
+def _get_engine() -> Engine:
+    """Create a SQLAlchemy engine from the configured db_path."""
+    settings = load_settings()
+    return make_engine(f"sqlite:///{settings.db_path}")
 
 
 @app.command()
@@ -115,6 +130,74 @@ def config_show() -> None:
         typer.echo(f"{field.ljust(max_field)}  {value.ljust(max_val)}  [{source}]")
 
 
+@account_app.command("new")
+def account_new(
+    name: str,
+    currency: str = typer.Option("COP", "--currency", "-c", help="Currency ISO code"),
+) -> None:
+    """Create a new account."""
+    from pyfintracker.exceptions import FinanceError
+    from pyfintracker.models import Account
+    from pyfintracker.repository import create_account
+    from pyfintracker.validation import validate_account_name, validate_currency
+
+    try:
+        name = validate_account_name(name)
+        currency = validate_currency(currency)
+    except FinanceError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1) from None
+
+    # Derive kind and depth from the colon-separated name
+    parts = name.split(":")
+    kind = parts[0]
+    depth = len(parts) - 1
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            account = create_account(
+                conn,
+                Account(
+                    name=name, currency=currency, depth=depth, kind=kind
+                ),
+            )
+    except FinanceError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1) from None
+
+    typer.echo(f"\u2713 Account '{name}' created (id={account.id})")
+
+
+@account_app.command("list")
+def account_list() -> None:
+    """List all accounts."""
+    from pyfintracker.repository import list_accounts
+
+    engine = _get_engine()
+    with engine.begin() as conn:
+        accounts = list_accounts(conn)
+
+    console = Console()
+    table = Table(title="Accounts")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Type", style="yellow")
+    table.add_column("Currency", style="green")
+    table.add_column("Depth")
+
+    for acc in accounts:
+        table.add_row(
+            str(acc.id or ""),
+            acc.name,
+            acc.kind,
+            acc.currency,
+            str(acc.depth),
+        )
+
+    console.print(table)
+
+
 def _run_alembic(engine: Engine, action: str, revision: str) -> None:
     """Run an Alembic command on a given engine.
 
@@ -141,6 +224,7 @@ def _run_alembic(engine: Engine, action: str, revision: str) -> None:
 
 
 __all__ = [
+    "account_app",
     "app",
     "config_show",
     "init",

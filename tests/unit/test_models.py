@@ -1,0 +1,156 @@
+"""Tests for Account frozen dataclass."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from pyfintracker.models import Account
+
+
+@pytest.mark.unit
+class TestAccountFrozenDataclass:
+    """T-2.1: Account is a frozen dataclass with validation in __post_init__."""
+
+    def test_valid_account_minimal(self) -> None:
+        """Account with bare minimum required fields."""
+        acct = Account(name="Assets:Checking", currency="COP", depth=1, kind="Assets")
+        assert acct.name == "Assets:Checking"
+        assert acct.currency == "COP"
+        assert acct.depth == 1
+        assert acct.kind == "Assets"
+        assert acct.id is None
+        assert acct.parent_id is None
+        assert acct.is_archived is False
+
+    def test_valid_account_with_id(self) -> None:
+        """Account with optional id set."""
+        acct = Account(id=1, name="Assets:Checking", currency="COP", depth=1, kind="Assets")
+        assert acct.id == 1
+
+    def test_account_is_frozen(self) -> None:
+        """Account fields cannot be set after init."""
+        acct = Account(name="Assets:Checking", currency="COP", depth=1, kind="Assets")
+        with pytest.raises(AttributeError):
+            acct.name = "Liabilities:Loan"  # type: ignore[misc]
+
+    def test_invalid_kind(self) -> None:
+        """Account rejects kind not in ROOT_TYPES."""
+        with pytest.raises(ValueError, match="Invalid kind"):
+            Account(name="Assets:Checking", currency="COP", depth=1, kind="FakeAssets")
+
+    def test_empty_kind(self) -> None:
+        """Account rejects empty kind."""
+        with pytest.raises(ValueError, match="Invalid kind"):
+            Account(name="Assets:Checking", currency="COP", depth=1, kind="")
+
+    def test_invalid_depth_negative(self) -> None:
+        """Account rejects negative depth."""
+        with pytest.raises(ValueError, match="Depth must be 0-2"):
+            Account(name="Income:Salary", currency="COP", depth=-1, kind="Income")
+
+    def test_invalid_depth_too_deep(self) -> None:
+        """Account rejects depth > 2."""
+        with pytest.raises(ValueError, match="Depth must be 0-2"):
+            Account(name="Expenses:Food:Groceries", currency="COP", depth=3, kind="Expenses")
+
+    def test_invalid_name_empty(self) -> None:
+        """Account rejects empty name."""
+        with pytest.raises(ValueError, match="Account name cannot be empty"):
+            Account(name="", currency="COP", depth=0, kind="Assets")
+
+    def test_valid_account_all_fields(self) -> None:
+        """Account with all optional fields set explicitly."""
+        acct = Account(
+            id=5,
+            name="Expenses:Food:Groceries",
+            parent_id=3,
+            currency="USD",
+            depth=2,
+            kind="Expenses",
+            is_archived=True,
+        )
+        assert acct.id == 5
+        assert acct.name == "Expenses:Food:Groceries"
+        assert acct.parent_id == 3
+        assert acct.currency == "USD"
+        assert acct.depth == 2
+        assert acct.kind == "Expenses"
+        assert acct.is_archived is True
+
+    def test_valid_depth_zero(self) -> None:
+        """Depth 0 is valid (root account placeholder)."""
+        acct = Account(name="Assets:Cash", currency="COP", depth=0, kind="Assets")
+        assert acct.depth == 0
+
+
+@pytest.mark.unit
+class TestAccountRowConversion:
+    """T-2.2: Account.to_row() / from_row() conversion."""
+
+    def test_to_row_minimal(self) -> None:
+        """to_row() returns dict without optional fields when not set."""
+        acct = Account(name="Assets:Checking", currency="COP", depth=1, kind="Assets")
+        row = acct.to_row()
+        assert row == {
+            "name": "Assets:Checking",
+            "currency": "COP",
+            "depth": 1,
+            "kind": "Assets",
+            "is_archived": 0,
+        }
+
+    def test_to_row_with_id(self) -> None:
+        """to_row() includes id when set."""
+        acct = Account(id=42, name="Assets:Savings", currency="USD", depth=1, kind="Assets")
+        row = acct.to_row()
+        assert row["id"] == 42
+
+    def test_to_row_with_parent_id(self) -> None:
+        """to_row() includes parent_id when set."""
+        acct = Account(
+            id=5, name="Expenses:Food:Groceries", parent_id=3,
+            currency="COP", depth=2, kind="Expenses",
+        )
+        row = acct.to_row()
+        assert row["parent_id"] == 3
+
+    def test_to_row_archived(self) -> None:
+        """to_row() sets is_archived=1 when archived."""
+        acct = Account(
+            name="Liabilities:CreditCard", currency="COP", depth=1,
+            kind="Liabilities", is_archived=True,
+        )
+        row = acct.to_row()
+        assert row["is_archived"] == 1
+
+    def test_from_row_roundtrip_no_id(self) -> None:
+        """from_row(to_row(account)) == account with None id."""
+        acct = Account(name="Income:Salary", currency="COP", depth=1, kind="Income")
+        row = acct.to_row()
+        # Simulate a SQLAlchemy RowMapping
+        row_data = dict(row)
+        mock_row = MagicMock()
+        mock_row._mapping = row_data
+        restored = Account.from_row(mock_row)
+        assert restored == acct
+
+    def test_from_row_roundtrip_with_id(self) -> None:
+        """from_row(to_row(account)) == account with explicit id."""
+        acct = Account(id=10, name="Expenses:Rent", parent_id=7, currency="USD", depth=1, kind="Expenses", is_archived=True)
+        row = acct.to_row()
+        row_data = dict(row)
+        mock_row = MagicMock()
+        mock_row._mapping = row_data
+        restored = Account.from_row(mock_row)
+        assert restored == acct
+
+    def test_from_row_handles_row_without_mapping(self) -> None:
+        """from_row also works on rows without _mapping (direct dict compat)."""
+        acct = Account(id=3, name="Equity:Opening", currency="COP", depth=0, kind="Equity")
+        row = acct.to_row()
+        mock_row = MagicMock(spec=[])  # No _mapping attr
+        mock_row._mapping = row  # But we add it manually like a real SA row
+        restored = Account.from_row(mock_row)
+        assert restored == acct
