@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
-from pyfintracker.models import Account
-from pyfintracker.validation import validate_account_name
+from pyfintracker.models import Account, Posting, Transaction
+from pyfintracker.validation import validate_account_name, validate_transaction
 
 
 def create_account(conn: Connection, account: Account) -> Account:
@@ -108,10 +108,67 @@ def account_has_postings(conn: Connection, account_id: int) -> bool:
     return result is not None
 
 
+def upsert_account(conn: Connection, name: str, currency: str) -> Account:
+    """Get an existing account by name or create a new one.
+
+    Returns the existing account if found, otherwise creates a new one
+    with auto-derived kind and depth.
+    """
+    existing = get_account_by_name(conn, name)
+    if existing is not None:
+        return existing
+
+    parts = name.split(":")
+    kind = parts[0]
+    depth = len(parts) - 1
+    return create_account(
+        conn,
+        Account(name=name, currency=currency, depth=depth, kind=kind),
+    )
+
+
+def create_transaction_with_postings(
+    conn: Connection, txn: Transaction, postings: Sequence[Posting],
+) -> int:
+    """Create a transaction with its postings in a single atomic write.
+
+    Validates the transaction first, then inserts both the transaction
+    and its postings. Returns the new transaction ID.
+    """
+    validate_transaction(txn, postings)
+
+    result = conn.execute(
+        text("""
+            INSERT INTO transactions (date, description)
+            VALUES (:date, :description)
+        """),
+        {"date": str(txn.date), "description": txn.description},
+    )
+    txn_id = result.lastrowid
+
+    for p in postings:
+        conn.execute(
+            text("""
+                INSERT INTO postings (transaction_id, account_id, amount, currency)
+                VALUES (:transaction_id, :account_id, :amount, :currency)
+            """),
+            {
+                "transaction_id": txn_id,
+                "account_id": p.account_id,
+                "amount": str(p.amount),
+                "currency": p.currency,
+            },
+        )
+
+    return txn_id
+
+
 __all__ = [
     "account_has_postings",
     "create_account",
+    "create_transaction_with_postings",
     "get_account_by_id",
     "get_account_by_name",
     "list_accounts",
+    "upsert_account",
 ]

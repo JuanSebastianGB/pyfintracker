@@ -132,24 +132,40 @@ def config_show() -> None:
 
 @account_app.command("new")
 def account_new(
-    name: str,
+    name: str = typer.Argument(..., help="Account name (e.g. Assets:Cash)"),
     currency: str = typer.Option("COP", "--currency", "-c", help="Currency ISO code"),
+    description: str = typer.Option("", help="Optional description"),
+    initial: str | None = typer.Option(None, "--initial", help="Opening balance"),
 ) -> None:
     """Create a new account."""
+    from datetime import date
+
     from pyfintracker.exceptions import FinanceError
-    from pyfintracker.models import Account
-    from pyfintracker.repository import create_account
-    from pyfintracker.validation import validate_account_name, validate_currency
+    from pyfintracker.models import Account, Posting, Transaction
+    from pyfintracker.repository import (
+        create_account,
+        create_transaction_with_postings,
+        get_account_by_name,
+        upsert_account,
+    )
+    from pyfintracker.validation import (
+        validate_account_name,
+        validate_amount,
+        validate_currency,
+        validate_description,
+    )
 
     try:
-        name = validate_account_name(name)
-        currency = validate_currency(currency)
+        canonical = validate_account_name(name)
+        validated_currency = validate_currency(currency)
+        if description:
+            validate_description(description)
     except FinanceError as e:
         typer.echo(str(e))
         raise typer.Exit(code=1) from None
 
     # Derive kind and depth from the colon-separated name
-    parts = name.split(":")
+    parts = canonical.split(":")
     kind = parts[0]
     depth = len(parts) - 1
 
@@ -158,15 +174,44 @@ def account_new(
         with engine.begin() as conn:
             account = create_account(
                 conn,
-                Account(
-                    name=name, currency=currency, depth=depth, kind=kind
-                ),
+                Account(name=canonical, currency=validated_currency, depth=depth, kind=kind),
             )
-    except FinanceError as e:
-        typer.echo(str(e))
-        raise typer.Exit(code=1) from None
 
-    typer.echo(f"\u2713 Account '{name}' created (id={account.id})")
+            if initial is not None:
+                validated_amount = validate_amount(initial, validated_currency)
+
+                assert account.id is not None  # freshly created
+
+                equity = get_account_by_name(conn, "Equity:OpeningBalances")
+                if equity is None:
+                    equity = upsert_account(
+                        conn, name="Equity:OpeningBalances",
+                        currency=validated_currency,
+                    )
+                assert equity.id is not None
+
+                txn = Transaction(
+                    date=date.today(),
+                    description=f"Opening balance for {canonical}",
+                    currency=validated_currency,
+                )
+                postings = [
+                    Posting(account_id=account.id, amount=validated_amount, currency=validated_currency),
+                    Posting(account_id=equity.id, amount=-validated_amount, currency=validated_currency),
+                ]
+                create_transaction_with_postings(conn, txn, postings)
+
+                console = Console()
+                console.print(f"[green]✓[/green] '{canonical}' created with opening balance {validated_amount} {validated_currency}")
+                return
+
+            console = Console()
+            console.print(f"[green]✓[/green] Account '{canonical}' created ({validated_currency})")
+
+    except (FinanceError, ValueError) as e:
+        console = Console()
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
 
 
 @account_app.command("list")
@@ -198,6 +243,75 @@ def account_list() -> None:
     console.print(table)
 
 
+@app.command()
+def add(
+    from_account: str = typer.Option(..., "--from", help="Source account"),
+    to_account: str = typer.Option(..., "--to", help="Destination account"),
+    amount: str = typer.Option(..., "--amount", help="Amount to transfer"),
+    currency: str = typer.Option("COP", "--currency", help="Currency"),
+    description: str = typer.Option(..., "--description", help="Transaction description"),
+) -> None:
+    """Add a two-posting transaction (double-entry)."""
+    from datetime import date
+
+    from pyfintracker.exceptions import FinanceError
+    from pyfintracker.models import Posting, Transaction
+    from pyfintracker.repository import (
+        create_transaction_with_postings,
+        get_account_by_name,
+    )
+    from pyfintracker.validation import (
+        validate_account_name,
+        validate_amount,
+        validate_currency,
+        validate_description,
+    )
+
+    try:
+        validated_amount = validate_amount(amount, currency)
+        from_name = validate_account_name(from_account)
+        to_name = validate_account_name(to_account)
+        validated_currency = validate_currency(currency)
+        validate_description(description)
+    except FinanceError as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            src = get_account_by_name(conn, from_name)
+            if src is None:
+                console = Console()
+                console.print(f"[red]Error:[/red] Account '{from_name}' not found")
+                raise typer.Exit(code=1)
+            assert src.id is not None
+            dst = get_account_by_name(conn, to_name)
+            if dst is None:
+                console = Console()
+                console.print(f"[red]Error:[/red] Account '{to_name}' not found")
+                raise typer.Exit(code=1)
+            assert dst.id is not None
+
+            txn = Transaction(
+                date=date.today(), description=description, currency=validated_currency,
+            )
+            postings = [
+                Posting(account_id=src.id, amount=-validated_amount, currency=validated_currency),
+                Posting(account_id=dst.id, amount=validated_amount, currency=validated_currency),
+            ]
+
+            txn_id = create_transaction_with_postings(conn, txn, postings)
+
+        console = Console()
+        console.print(f"[green]✓[/green] Transaction #{txn_id}: {description} ({validated_amount} {validated_currency})")
+
+    except (FinanceError, ValueError) as e:
+        console = Console()
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=getattr(e, 'code', 1)) from None
+
+
 def _run_alembic(engine: Engine, action: str, revision: str) -> None:
     """Run an Alembic command on a given engine.
 
@@ -225,6 +339,7 @@ def _run_alembic(engine: Engine, action: str, revision: str) -> None:
 
 __all__ = [
     "account_app",
+    "add",
     "app",
     "config_show",
     "init",

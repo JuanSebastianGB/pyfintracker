@@ -64,6 +64,10 @@ class ZeroAmountPosting(ValidationError):
     """A posting must have a non-zero amount."""
 
 
+class InvalidDescription(ValidationError):
+    """Description exceeds maximum length."""
+
+
 class UnbalancedTransaction(ValidationError):
     """Sum of postings does not equal zero."""
 
@@ -108,6 +112,7 @@ __all__ = [
     "InvalidAmount",
     "InvalidCurrency",
     "InvalidDate",
+    "InvalidDescription",
     "NotInitializedError",
     "ReplRequiresTTYError",
     "TooFewPostings",

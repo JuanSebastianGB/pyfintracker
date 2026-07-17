@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 import pytest
 
-from pyfintracker.models import Account
+from pyfintracker.models import Account, Posting, Transaction
 
 
 @pytest.mark.unit
@@ -154,3 +156,79 @@ class TestAccountRowConversion:
         mock_row._mapping = row  # But we add it manually like a real SA row
         restored = Account.from_row(mock_row)
         assert restored == acct
+
+
+@pytest.mark.unit
+class TestPosting:
+    """T-4.1: Posting frozen dataclass."""
+
+    def test_construction(self) -> None:
+        p = Posting(account_id=1, amount=Decimal("100.00"), currency="COP")
+        assert p.account_id == 1
+        assert p.amount == Decimal("100.00")
+        assert p.currency == "COP"
+
+    def test_with_transaction_id(self) -> None:
+        p = Posting(transaction_id=5, account_id=1, amount=Decimal("100.00"), currency="COP")
+        assert p.transaction_id == 5
+
+    def test_frozen(self) -> None:
+        p = Posting(account_id=1, amount=Decimal("100"), currency="COP")
+        with pytest.raises(AttributeError):
+            p.amount = Decimal("200")  # type: ignore[misc]
+
+    def test_to_row(self) -> None:
+        p = Posting(transaction_id=5, account_id=1, amount=Decimal("100.00"), currency="COP")
+        row = p.to_row()
+        assert row["transaction_id"] == 5
+        assert row["account_id"] == 1
+
+    def test_from_row(self) -> None:
+        row = {"id": 10, "transaction_id": 5, "account_id": 1,
+               "amount": Decimal("100.00"), "currency": "COP"}
+        p = Posting.from_row(row)
+        assert p.id == 10
+        assert p.amount == Decimal("100.00")
+
+    def test_roundtrip(self) -> None:
+        original = Posting(transaction_id=5, account_id=1, amount=Decimal("100.00"), currency="COP")
+        row = original.to_row()
+        restored = Posting.from_row(row)
+        assert restored == original
+
+
+@pytest.mark.unit
+class TestTransaction:
+    """T-4.2: Transaction frozen dataclass."""
+
+    def test_construction(self) -> None:
+        t = Transaction(date=date(2024, 1, 15), description="Test txn")
+        assert t.date == date(2024, 1, 15)
+        assert t.description == "Test txn"
+        assert t.currency == "COP"
+
+    def test_with_id(self) -> None:
+        t = Transaction(id=1, date=date(2024, 1, 15), description="Test")
+        assert t.id == 1
+
+    def test_frozen(self) -> None:
+        t = Transaction(date=date(2024, 1, 15), description="Test")
+        with pytest.raises(AttributeError):
+            t.date = date(2024, 2, 1)  # type: ignore[misc]
+
+    def test_to_row(self) -> None:
+        t = Transaction(id=1, date=date(2024, 1, 15), description="Test", currency="COP")
+        row = t.to_row()
+        assert row["id"] == 1
+
+    def test_from_row(self) -> None:
+        row = {"id": 1, "date": date(2024, 1, 15), "description": "Test", "currency": "COP"}
+        t = Transaction.from_row(row)
+        assert t.id == 1
+        assert t.date == date(2024, 1, 15)
+
+    def test_roundtrip(self) -> None:
+        original = Transaction(date=date(2024, 1, 15), description="Test", currency="COP")
+        row = original.to_row()
+        restored = Transaction.from_row(row)
+        assert restored == original

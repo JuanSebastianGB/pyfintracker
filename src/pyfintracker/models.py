@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 ROOT_TYPES: frozenset[str] = frozenset(
@@ -66,7 +69,75 @@ class Account:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Posting:
+    """A single posting in a double-entry transaction."""
+
+    id: int | None = None
+    transaction_id: int | None = None
+    account_id: int = 0
+    amount: Decimal = Decimal("0")
+    currency: str = "COP"
+
+    def to_row(self) -> dict[str, object]:
+        """Convert to dict for SQLAlchemy Core insertion."""
+        d: dict[str, object] = {
+            "account_id": self.account_id,
+            "amount": self.amount,
+            "currency": self.currency,
+        }
+        if self.id is not None:
+            d["id"] = self.id
+        if self.transaction_id is not None:
+            d["transaction_id"] = self.transaction_id
+        return d
+
+    @staticmethod
+    def from_row(row: Mapping[str, Any]) -> Posting:
+        """Reconstruct from a SQLAlchemy result row."""
+        return Posting(
+            id=row.get("id"),
+            transaction_id=row.get("transaction_id"),
+            account_id=row["account_id"],
+            amount=row["amount"],
+            currency=row.get("currency", "COP"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Transaction:
+    """A financial transaction with a list of postings."""
+
+    id: int | None = None
+    date: date | None = None
+    description: str = ""
+    currency: str = "COP"
+
+    def to_row(self) -> dict[str, object]:
+        """Convert to dict for SQLAlchemy Core insertion."""
+        d: dict[str, object] = {
+            "date": self.date,
+            "description": self.description,
+            "currency": self.currency,
+        }
+        if self.id is not None:
+            d["id"] = self.id
+        return d
+
+    @staticmethod
+    def from_row(row: Mapping[str, Any]) -> Transaction:
+        """Reconstruct from a SQLAlchemy result row."""
+        return Transaction(
+            id=row.get("id"),
+            date=row["date"],
+            description=row["description"],
+            currency=row.get("currency", "COP"),
+        )
+
+
 __all__ = [
     "ROOT_TYPES",
     "Account",
+    "Posting",
+    "Transaction",
 ]
