@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Callable
+from decimal import Decimal
 from importlib.metadata import version as pkg_version
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    from pyfintracker.models import Posting, Transaction
+
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import Engine
 
 from pyfintracker.config import load_settings, source_of
 from pyfintracker.db import make_engine
+from pyfintracker.exceptions import ReplRequiresTTYError
 
 __version__ = pkg_version("pyfintracker")
 
@@ -245,20 +254,21 @@ def account_list() -> None:
 
 @app.command()
 def add(
-    from_account: str = typer.Option(..., "--from", help="Source account"),
-    to_account: str = typer.Option(..., "--to", help="Destination account"),
-    amount: str = typer.Option(..., "--amount", help="Amount to transfer"),
+    from_account: str | None = typer.Option(None, "--from", help="Source account"),
+    to_account: str | None = typer.Option(None, "--to", help="Destination account"),
+    amount: str | None = typer.Option(None, "--amount", help="Amount to transfer"),
     currency: str = typer.Option("COP", "--currency", help="Currency"),
-    description: str = typer.Option(..., "--description", help="Transaction description"),
+    description: str | None = typer.Option(None, "--description", help="Transaction description"),
 ) -> None:
-    """Add a two-posting transaction (double-entry)."""
+    """Add a transaction. Use flags for direct entry, or omit flags for REPL."""
     from datetime import date
 
-    from pyfintracker.exceptions import FinanceError
+    from pyfintracker.exceptions import AccountNotFoundError, FinanceError
     from pyfintracker.models import Posting, Transaction
     from pyfintracker.repository import (
         create_transaction_with_postings,
         get_account_by_name,
+        list_accounts,
     )
     from pyfintracker.validation import (
         validate_account_name,
@@ -266,6 +276,54 @@ def add(
         validate_currency,
         validate_description,
     )
+
+    # Detect REPL vs flag mode
+    flag_args = [from_account, to_account, amount, description]
+    flag_mode = any(a is not None for a in flag_args)
+
+    if not flag_mode:
+        # ── REPL mode ───────────────────────────────────────
+        # TTY check is inside repl_add_postings — no need to duplicate here.
+        console = Console()
+        engine = _get_engine()
+
+        try:
+            with engine.begin() as conn:
+                accounts = list_accounts(conn)
+                account_names = [a.name for a in accounts]
+
+                def _resolve(name: str) -> int:
+                    acct = get_account_by_name(conn, name)
+                    if acct is None:
+                        raise AccountNotFoundError(f"Account '{name}' not found")
+                    assert acct.id is not None
+                    return acct.id
+
+                txn, postings = repl_add_postings(
+                    console, _stdin_prompt, _resolve, account_names,
+                )
+                txn_id = create_transaction_with_postings(conn, txn, postings)
+
+            console.print(f"[green]✓[/green] Transaction #{txn_id}: {txn.description}")
+        except FinanceError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=getattr(e, 'code', 1)) from None
+
+        return
+
+    # ── Flag mode — partial flags check ─────────────────────
+    if not all(a is not None for a in flag_args):
+        Console().print(
+            "[red]Error:[/red] Use all flags (--from, --to, --amount, --description) "
+            "or none (for REPL mode)."
+        )
+        raise typer.Exit(code=2)
+
+    # Narrow types after the all-not-None guard (mypy can't do this)
+    assert from_account is not None
+    assert to_account is not None
+    assert amount is not None
+    assert description is not None
 
     try:
         validated_amount = validate_amount(amount, currency)
@@ -312,6 +370,135 @@ def add(
         raise typer.Exit(code=getattr(e, 'code', 1)) from None
 
 
+def _parse_repl_amount(raw: str) -> Decimal:
+    """Parse REPL amount input: strip commas, reject zero and non-numeric."""
+    import re
+    from decimal import InvalidOperation
+
+    from pyfintracker.exceptions import InvalidAmount
+
+    cleaned = re.sub(r"[,\s]", "", raw.strip())
+    if not cleaned:
+        raise InvalidAmount("Amount is empty")
+    try:
+        amount = Decimal(cleaned)
+    except InvalidOperation:
+        raise InvalidAmount(f"Invalid amount: '{raw}'") from None
+    if amount == Decimal("0"):
+        raise InvalidAmount("Amount cannot be zero")
+    return amount
+
+
+def _suggest_accounts(name: str, available: list[str]) -> list[str]:
+    """Find closest matching account names (case-insensitive substring match)."""
+    lower = name.lower()
+    return [a for a in available if lower in a.lower()][:5]
+
+
+def repl_add_postings(
+    console: Console,
+    prompt_fn: Callable[..., str],
+    resolve_account: Callable[[str], int] | None = None,
+    available_accounts: list[str] | None = None,
+) -> tuple[Transaction, list[Posting]]:
+    """Interactive REPL for transaction entry.
+
+    Args:
+        console: Rich Console for output.
+        prompt_fn: Callable accepting (prompt_text, default="") and returning
+            user input.  In production wraps questionary / input(); in tests
+            returns scripted replies.
+        resolve_account: Optional callback to resolve account names to IDs.
+            When None, account_id is set to 0 (for tests).
+        available_accounts: Optional list of valid account names for suggestions.
+
+    Returns:
+        Tuple of (Transaction, List[Posting]) ready to save.
+        When resolve_account is provided, Posting.account_id is the real ID.
+    """
+    from datetime import date as dt_date
+
+    from pyfintracker.exceptions import AccountNotFoundError
+    from pyfintracker.models import Posting, Transaction
+    from pyfintracker.validation import validate_amount
+
+    if not sys.stdin.isatty():
+        raise ReplRequiresTTYError(
+            "REPL requires interactive terminal; "
+            "use --from/--to for non-interactive entry"
+        )
+
+    # ── Date ───────────────────────────────────────────────────────────
+    raw_date = _repl_prompt(prompt_fn, "Date (YYYY-MM-DD)")
+    parts = raw_date.split("-")
+    txn_date = dt_date(int(parts[0]), int(parts[1]), int(parts[2]))
+
+    # ── Description ────────────────────────────────────────────────────
+    description = _repl_prompt(prompt_fn, "Description")
+
+    # ── Currency ───────────────────────────────────────────────────────
+    currency = _repl_prompt(prompt_fn, "Currency", "COP").upper()
+
+    # ── Posting loop ───────────────────────────────────────────────────
+    postings: list[Posting] = []
+    balance = Decimal("0")
+
+    while True:
+        account_name = _repl_prompt(prompt_fn, "Account")
+        raw_amount = _repl_prompt(prompt_fn, "Amount")
+
+        amount = _parse_repl_amount(raw_amount)
+        amount = validate_amount(amount, currency)
+
+        if resolve_account is not None:
+            try:
+                account_id = resolve_account(account_name)
+            except AccountNotFoundError as e:
+                console.print(f"[red]Error:[/red] {e}")
+                if available_accounts:
+                    suggestions = _suggest_accounts(account_name, available_accounts)
+                    if suggestions:
+                        console.print(f"  Did you mean: {', '.join(suggestions)}?")
+                continue  # re-prompt
+        else:
+            account_id = 0
+
+        balance += amount
+        postings.append(Posting(account_id=account_id, amount=amount, currency=currency))
+
+        if balance == Decimal("0") and len(postings) >= 2:
+            console.print("[green]✓ Transaction balanced[/green]")
+            break
+
+    txn = Transaction(date=txn_date, description=description, currency=currency)
+    return txn, postings
+
+
+def _stdin_prompt(text: str, default: str = "") -> str:
+    """Base prompt function: read input from stdin."""
+    try:
+        value = input(f"{text}: ")
+    except EOFError:
+        return default or ""
+    return value or default
+
+
+def _repl_prompt(prompt_fn: Callable[..., str], text: str, default: str = "") -> str:
+    """Prompt the user, handling :abort and KeyboardInterrupt."""
+    try:
+        value = str(prompt_fn(text, default))
+    except KeyboardInterrupt:
+        confirm = str(prompt_fn("Discard transaction? (y/N)", "n"))
+        if confirm.lower().startswith("y"):
+            raise SystemExit(130) from None
+        return _repl_prompt(prompt_fn, text, default)
+
+    if value.strip().lower() == ":abort":
+        raise SystemExit(130)
+
+    return value
+
+
 def _run_alembic(engine: Engine, action: str, revision: str) -> None:
     """Run an Alembic command on a given engine.
 
@@ -344,5 +531,6 @@ __all__ = [
     "config_show",
     "init",
     "migrate",
+    "repl_add_postings",
     "version",
 ]
