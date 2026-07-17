@@ -8,11 +8,17 @@ from decimal import Decimal
 import pytest
 
 from pyfintracker.exceptions import (
+    CurrencyMismatchError,
     InvalidAccountName,
     InvalidAmount,
     InvalidCurrency,
     InvalidDate,
+    InvalidDescription,
+    TooFewPostings,
+    UnbalancedTransaction,
+    ZeroAmountPosting,
 )
+from pyfintracker.models import Account, Posting, Transaction
 from pyfintracker.validation import (
     PER_CURRENCY_DECIMALS,
     quantize_for_currency,
@@ -20,6 +26,9 @@ from pyfintracker.validation import (
     validate_amount,
     validate_currency,
     validate_date,
+    validate_description,
+    validate_posting,
+    validate_transaction,
 )
 
 
@@ -405,3 +414,95 @@ def test_quantize_for_currency_invalid_code() -> None:
     """Lowercase invalid code 'xyz' raises InvalidCurrency."""
     with pytest.raises(InvalidCurrency):
         quantize_for_currency(Decimal("100"), "xyz")
+
+
+# ── T-4.4: validate_posting ────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestValidatePosting:
+    """T-4.4: validate_posting(posting, account) currency coherence."""
+
+    def test_matching_currency_ok(self) -> None:
+        account = Account(name="Assets:Cash", currency="COP", kind="Assets", depth=1)
+        posting = Posting(account_id=1, amount=Decimal("100"), currency="COP")
+        validate_posting(posting, account)
+
+    def test_mismatch_raises(self) -> None:
+        account = Account(name="Assets:Cash", currency="COP", kind="Assets", depth=1)
+        posting = Posting(account_id=1, amount=Decimal("100"), currency="USD")
+        with pytest.raises(CurrencyMismatchError):
+            validate_posting(posting, account)
+
+
+# ── T-4.5: validate_transaction fail-fast ─────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestValidateTransaction:
+    """T-4.5: validate_transaction(txn, postings) fail-fast order."""
+
+    def test_valid_transaction(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        postings = [
+            Posting(account_id=1, amount=Decimal("100"), currency="COP"),
+            Posting(account_id=2, amount=Decimal("-100"), currency="COP"),
+        ]
+        validate_transaction(txn, postings)
+
+    def test_too_few_postings(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        with pytest.raises(TooFewPostings):
+            validate_transaction(txn, [Posting(account_id=1, amount=Decimal("100"), currency="COP")])
+
+    def test_no_postings(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        with pytest.raises(TooFewPostings):
+            validate_transaction(txn, [])
+
+    def test_zero_amount_posting(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        postings = [
+            Posting(account_id=1, amount=Decimal("0"), currency="COP"),
+            Posting(account_id=2, amount=Decimal("0"), currency="COP"),
+        ]
+        with pytest.raises(ZeroAmountPosting):
+            validate_transaction(txn, postings)
+
+    def test_currency_mismatch(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        postings = [
+            Posting(account_id=1, amount=Decimal("100"), currency="COP"),
+            Posting(account_id=2, amount=Decimal("-100"), currency="USD"),
+        ]
+        with pytest.raises(CurrencyMismatchError):
+            validate_transaction(txn, postings)
+
+    def test_unbalanced(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        postings = [
+            Posting(account_id=1, amount=Decimal("100"), currency="COP"),
+            Posting(account_id=2, amount=Decimal("-50"), currency="COP"),
+        ]
+        with pytest.raises(UnbalancedTransaction):
+            validate_transaction(txn, postings)
+
+    def test_fail_fast_count(self) -> None:
+        txn = Transaction(date=date(2024, 1, 15), description="Test")
+        with pytest.raises(TooFewPostings):
+            validate_transaction(txn, [Posting(account_id=1, amount=Decimal("0"), currency="COP")])
+
+
+@pytest.mark.unit
+class TestValidateDescription:
+    """T-4.5: validate_description(desc) -> str."""
+
+    def test_too_long(self) -> None:
+        with pytest.raises(InvalidDescription):
+            validate_description("a" * 257)
+
+    def test_ok(self) -> None:
+        assert validate_description("Buy coffee") == "Buy coffee"
+
+    def test_empty_ok(self) -> None:
+        assert validate_description("") == ""

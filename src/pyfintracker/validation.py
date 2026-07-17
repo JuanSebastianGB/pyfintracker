@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from pyfintracker.exceptions import (
+    CurrencyMismatchError,
     InvalidAccountName,
     InvalidAmount,
     InvalidCurrency,
     InvalidDate,
+    InvalidDescription,
+    TooFewPostings,
+    UnbalancedTransaction,
+    ZeroAmountPosting,
 )
+from pyfintracker.models import Account, Posting, Transaction
 
 ACCOUNT_NAME_RE: re.Pattern[str] = re.compile(
     r"^[A-Z][a-z]+:[A-Z][\w-]+(:[A-Z][\w-]+)?$"
@@ -146,6 +153,51 @@ def validate_amount(value: object, currency: str) -> Decimal:
     return quantize_for_currency(amount, currency)
 
 
+def validate_posting(posting: Posting, account: Account) -> None:
+    """Verify posting currency matches account currency (D6)."""
+    if posting.currency != account.currency:
+        raise CurrencyMismatchError(
+            f"Posting currency '{posting.currency}' doesn't match account "
+            f"'{account.name}' currency '{account.currency}'"
+        )
+
+
+def validate_transaction(txn: Transaction, postings: Sequence[Posting]) -> None:
+    """Validate a transaction's postings in fail-fast order.
+
+    Order: count >= 2 -> no zero-amount -> single currency -> sum=0.
+    """
+    if len(postings) < 2:
+        raise TooFewPostings(
+            f"Transaction needs at least 2 postings, got {len(postings)}"
+        )
+
+    for p in postings:
+        if p.amount == Decimal("0"):
+            raise ZeroAmountPosting(
+                f"Posting for account_id={p.account_id} has zero amount"
+            )
+
+    currencies = {p.currency for p in postings}
+    if len(currencies) > 1:
+        raise CurrencyMismatchError(
+            f"All postings must share the same currency, got {currencies}"
+        )
+
+    total = sum(p.amount for p in postings)
+    if total != Decimal("0"):
+        raise UnbalancedTransaction(
+            f"Postings sum to {total}, must sum to 0"
+        )
+
+
+def validate_description(desc: str) -> str:
+    """Validate description length."""
+    if len(desc) > 256:
+        raise InvalidDescription(f"Description too long: {len(desc)} chars (max 256)")
+    return desc
+
+
 __all__ = [
     "ACCOUNT_NAME_RE",
     "PER_CURRENCY_DECIMALS",
@@ -155,4 +207,7 @@ __all__ = [
     "validate_amount",
     "validate_currency",
     "validate_date",
+    "validate_description",
+    "validate_posting",
+    "validate_transaction",
 ]
