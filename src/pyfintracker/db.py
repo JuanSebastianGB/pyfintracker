@@ -9,9 +9,12 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.types import Text, TypeDecorator
 
 
 def make_engine(url: str, *, echo: bool = False) -> Engine:
@@ -81,7 +84,39 @@ def _register_pragmas(engine: Engine) -> None:
         cursor.close()
 
 
+# ── Decimal type decorator ────────────────────────────────────────────────────
+
+
+class DecimalAsText(TypeDecorator):  # type: ignore[type-arg]
+    """Store Decimal as TEXT in SQLite to preserve precision.
+
+    SQLite NUMERIC/REAL would convert to float and lose precision.
+    This TypeDecorator ensures byte-exact Decimal roundtrip.
+    """
+
+    impl = Text
+    cache_ok = True  # Safe to cache because TEXT is always the same
+
+    def process_bind_param(
+        self, value: Decimal | None, dialect: Any
+    ) -> str | None:
+        if value is not None:
+            return str(value)
+        return None
+
+    def process_result_value(
+        self, value: str | None, dialect: Any
+    ) -> Decimal | None:
+        if value is not None:
+            return Decimal(value)
+        return None
+
+    def python_type(self) -> type[Decimal]:  # type: ignore[override]
+        return Decimal
+
+
 __all__ = [
+    "DecimalAsText",
     "apply_pragmas",
     "get_session",
     "make_engine",
