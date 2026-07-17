@@ -1,0 +1,57 @@
+{
+  "project": "pyfintracker",
+  "detected_at": "2026-07-16",
+  "stack": {
+    "language": "python",
+    "version": "3.12",
+    "package_manager": "uv",
+    "build_backend": "hatchling",
+    "cli": "typer",
+    "validation": "pydantic-v2",
+    "orm": "sqlalchemy-2.0-core",
+    "database": "sqlite",
+    "migrations": "alembic",
+    "output": "rich",
+    "http_client": "httpx"
+  },
+  "strict_tdd": true,
+  "tdd_mode": "strict",
+  "delivery_strategy": "chained_prs",
+  "review_budget": "standard",
+  "persistence_mode": "engram",
+  "available": {
+    "preflight": [],
+    "test_cycle": ["tdd"],
+    "quality_gates": ["property-based"]
+  },
+  "test_layers": {
+    "unit": true,
+    "integration": true,
+    "property_based": true,
+    "snapshot": true,
+    "e2e": false,
+    "component": false,
+    "contract": false,
+    "characterization": false
+  },
+  "coverage": {
+    "global_threshold": 70,
+    "money_threshold": 90,
+    "enforced": true,
+    "command": "uv run pytest --cov=pyfintracker --cov-fail-under=70"
+  },
+  "quality_tools": {
+    "linter": {"tool": "ruff", "command": "uv run ruff check", "available": true},
+    "typechecker": {"tool": "mypy", "command": "uv run mypy src", "available": true, "mode": "strict"},
+    "formatter": {"tool": "ruff", "command": "uv run ruff format", "available": true}
+  },
+  "markers": ["unit", "integration", "property", "snapshot"],
+  "notes": [
+    "Greenfield project — src/pyfintracker/ only contains __init__.py, no uncovered files yet.",
+    "Hypothesis detected → property-based quality gate active.",
+    "syrupy detected for snapshot tests but not mapped as a separate dimension (single-source-of-truth in test_cycle=tdd).",
+    "No UI framework → component/e2e not applicable.",
+    "No multi-service boundary → contract testing not applicable.",
+    "No stryker-style mutation dep → mutation not in quality_gates."
+  ]
+}
