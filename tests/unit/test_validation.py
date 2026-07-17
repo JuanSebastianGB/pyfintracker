@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
-from pyfintracker.exceptions import InvalidAccountName, InvalidCurrency, InvalidDate
-from pyfintracker.validation import validate_account_name, validate_currency, validate_date
+from pyfintracker.exceptions import (
+    InvalidAccountName,
+    InvalidAmount,
+    InvalidCurrency,
+    InvalidDate,
+)
+from pyfintracker.validation import (
+    PER_CURRENCY_DECIMALS,
+    quantize_for_currency,
+    validate_account_name,
+    validate_amount,
+    validate_currency,
+    validate_date,
+)
 
 
 @pytest.mark.unit
@@ -164,3 +177,231 @@ class TestValidateDate:
         """Future date is allowed per design D5."""
         result = validate_date("2099-12-31")
         assert result == date(2099, 12, 31)
+
+
+@pytest.mark.unit
+class TestPerCurrencyDecimals:
+    """T-3.2: PER_CURRENCY_DECIMALS precision constants."""
+
+    def test_cop_zero(self) -> None:
+        """COP has 0 decimal places."""
+        assert PER_CURRENCY_DECIMALS["COP"] == 0
+
+    def test_jpy_zero(self) -> None:
+        """JPY has 0 decimal places."""
+        assert PER_CURRENCY_DECIMALS["JPY"] == 0
+
+    def test_usd_two(self) -> None:
+        """USD has 2 decimal places."""
+        assert PER_CURRENCY_DECIMALS["USD"] == 2
+
+    def test_eur_two(self) -> None:
+        """EUR has 2 decimal places."""
+        assert PER_CURRENCY_DECIMALS["EUR"] == 2
+
+    def test_gbp_two(self) -> None:
+        """GBP has 2 decimal places."""
+        assert PER_CURRENCY_DECIMALS["GBP"] == 2
+
+    def test_unknown_currency_raises_key_error(self) -> None:
+        """Unknown currency raises KeyError."""
+        with pytest.raises(KeyError):
+            PER_CURRENCY_DECIMALS["ARS"]
+
+
+@pytest.mark.unit
+class TestQuantizeForCurrency:
+    """T-3.3: quantize_for_currency(amount, currency) -> Decimal."""
+
+    def test_cop_rounds_up(self) -> None:
+        """COP: Decimal('99.99') → Decimal('100') (rounds up to 0 decimals)."""
+        result = quantize_for_currency(Decimal("99.99"), "COP")
+        assert result == Decimal("100")
+
+    def test_usd_no_rounding_needed(self) -> None:
+        """USD: Decimal('99.49') → Decimal('99.49') (no rounding)."""
+        result = quantize_for_currency(Decimal("99.49"), "USD")
+        assert result == Decimal("99.49")
+
+    def test_usd_round_half_up(self) -> None:
+        """USD: Decimal('99.456') → Decimal('99.46') (ROUND_HALF_UP)."""
+        result = quantize_for_currency(Decimal("99.456"), "USD")
+        assert result == Decimal("99.46")
+
+    def test_negative_preserves_sign(self) -> None:
+        """Negative: Decimal('-99.456') → Decimal('-99.46')."""
+        result = quantize_for_currency(Decimal("-99.456"), "USD")
+        assert result == Decimal("-99.46")
+
+    def test_cop_sub_unit_rounds_to_zero(self) -> None:
+        """COP: Decimal('0.001') → Decimal('0') (sub-unit rounds to zero)."""
+        result = quantize_for_currency(Decimal("0.001"), "COP")
+        assert result == Decimal("0")
+
+    def test_unknown_currency_raises(self) -> None:
+        """Unknown currency raises InvalidCurrency."""
+        with pytest.raises(InvalidCurrency):
+            quantize_for_currency(Decimal("1.00"), "XYZ")
+
+
+@pytest.mark.unit
+class TestValidateAmount:
+    """T-3.4: validate_amount(value, currency) -> Decimal."""
+
+    def test_decimal_pass_through(self) -> None:
+        """Decimal('123.45') in USD returns Decimal('123.45')."""
+        result = validate_amount(Decimal("123.45"), "USD")
+        assert result == Decimal("123.45")
+
+    def test_string_accepted(self) -> None:
+        """String '123.45' in USD converts to Decimal('123.45')."""
+        result = validate_amount("123.45", "USD")
+        assert result == Decimal("123.45")
+
+    def test_rejects_float(self) -> None:
+        """Float raises InvalidAmount (float is NOT safe for money)."""
+        with pytest.raises(InvalidAmount):
+            validate_amount(123.45, "USD")
+
+    def test_int_accepted(self) -> None:
+        """Int 123 in COP returns Decimal('123') (quantized to 0 dp)."""
+        result = validate_amount(123, "COP")
+        assert result == Decimal("123")
+
+    def test_non_numeric_string_raises(self) -> None:
+        """Non-numeric string 'abc' raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount("abc", "USD")
+
+    def test_none_raises(self) -> None:
+        """None raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount(None, "USD")
+
+    def test_nan_raises(self) -> None:
+        """Decimal('NaN') raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount(Decimal("NaN"), "USD")
+
+    def test_infinity_raises(self) -> None:
+        """Decimal('Infinity') raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount(Decimal("Infinity"), "USD")
+
+    def test_negative_infinity_raises(self) -> None:
+        """Decimal('-Infinity') raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount(Decimal("-Infinity"), "USD")
+
+    def test_quantizes_usd(self) -> None:
+        """'99.456' in USD → Decimal('99.46') (quantized to 2 dp)."""
+        result = validate_amount("99.456", "USD")
+        assert result == Decimal("99.46")
+
+    def test_quantizes_cop(self) -> None:
+        """'99.7' in COP → Decimal('100') (rounded up to 0 dp)."""
+        result = validate_amount("99.7", "COP")
+        assert result == Decimal("100")
+
+    def test_empty_string_raises(self) -> None:
+        """Empty string raises InvalidAmount."""
+        with pytest.raises(InvalidAmount):
+            validate_amount("", "USD")
+
+    def test_unknown_currency_raises_invalid_currency(self) -> None:
+        """Unknown currency raises InvalidCurrency."""
+        with pytest.raises(InvalidCurrency):
+            validate_amount("100", "XYZ")
+
+
+# ── T-3.9: validate_amount edge cases (float, NaN, Inf, etc.) ────────────────
+
+
+@pytest.mark.parametrize("value,currency", [
+    (1.5, "COP"),           # float
+    (0.0, "COP"),           # float zero
+    (-1.5, "COP"),          # negative float
+    (Decimal("NaN"), "COP"),
+    (Decimal("Infinity"), "COP"),
+    (Decimal("-Infinity"), "COP"),
+    (Decimal("snan"), "COP"),   # signaling NaN
+    ("", "COP"),            # empty string
+    ("   ", "COP"),         # whitespace
+    ("abc", "COP"),         # non-numeric
+    (None, "COP"),          # None
+    ("12,34", "COP"),       # comma decimal (not period)
+    ("12.34.56", "COP"),    # double dot
+    ({}, "COP"),            # dict
+    ([], "COP"),            # list
+])
+def test_validate_amount_rejects_invalid(value: object, currency: str) -> None:
+    """Each bad input raises InvalidAmount."""
+    with pytest.raises(InvalidAmount):
+        validate_amount(value, currency)
+
+
+@pytest.mark.parametrize("value,currency,expected", [
+    ("123", "COP", Decimal("123")),
+    ("123.456", "COP", Decimal("123")),  # COP rounds to 0 places
+    ("123.456", "USD", Decimal("123.46")),  # USD rounds HALF_UP
+    ("123.454", "USD", Decimal("123.45")),  # USD rounds HALF_UP
+    (1, "COP", Decimal("1")),               # int accepted
+    ("0.001", "COP", Decimal("0")),         # COP rounds to 0
+    ("0.001", "JPY", Decimal("0")),
+    ("99.9999", "USD", Decimal("100.00")),  # USD rounds HALF_UP
+    ("0", "COP", Decimal("0")),
+    ("-123.456", "USD", Decimal("-123.46")),
+])
+def test_validate_amount_accepts_valid(value: object, currency: str, expected: Decimal) -> None:
+    """Valid inputs return quantized Decimal."""
+    result = validate_amount(value, currency)
+    assert result == expected
+    assert isinstance(result, Decimal)
+
+
+# ── T-3.10: quantize_for_currency parametrized per currency ──────────────────
+
+
+@pytest.mark.parametrize("amount,currency,expected", [
+    # COP (0 decimals)
+    (Decimal("99.5"), "COP", Decimal("100")),
+    (Decimal("99.4"), "COP", Decimal("99")),
+    (Decimal("0.1"), "COP", Decimal("0")),
+    (Decimal("999999.99"), "COP", Decimal("1000000")),
+    (Decimal("-99.5"), "COP", Decimal("-100")),
+    # JPY (0 decimals)
+    (Decimal("99.5"), "JPY", Decimal("100")),
+    (Decimal("99.4"), "JPY", Decimal("99")),
+    # USD (2 decimals)
+    (Decimal("99.456"), "USD", Decimal("99.46")),
+    (Decimal("99.454"), "USD", Decimal("99.45")),
+    (Decimal("99.5"), "USD", Decimal("99.50")),
+    (Decimal("0.005"), "USD", Decimal("0.01")),
+    (Decimal("-0.005"), "USD", Decimal("-0.01")),
+    # EUR (2 decimals)
+    (Decimal("123.456"), "EUR", Decimal("123.46")),
+    (Decimal("123.454"), "EUR", Decimal("123.45")),
+    # GBP (2 decimals)
+    (Decimal("9.9999"), "GBP", Decimal("10.00")),
+    # Perfect precision preserved
+    (Decimal("100"), "COP", Decimal("100")),
+    (Decimal("100.00"), "USD", Decimal("100.00")),
+    (Decimal("100.00"), "COP", Decimal("100")),
+])
+def test_quantize_for_currency(amount: Decimal, currency: str, expected: Decimal) -> None:
+    """Parametrized: quantize_for_currency per currency."""
+    result = quantize_for_currency(amount, currency)
+    assert result == expected
+    assert isinstance(result, Decimal)
+
+
+def test_quantize_for_currency_unknown() -> None:
+    """Unknown currency XXX raises InvalidCurrency."""
+    with pytest.raises(InvalidCurrency):
+        quantize_for_currency(Decimal("100"), "XXX")
+
+
+def test_quantize_for_currency_invalid_code() -> None:
+    """Lowercase invalid code 'xyz' raises InvalidCurrency."""
+    with pytest.raises(InvalidCurrency):
+        quantize_for_currency(Decimal("100"), "xyz")
