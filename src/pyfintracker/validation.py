@@ -24,17 +24,27 @@ ACCOUNT_NAME_RE: re.Pattern[str] = re.compile(
     r"^[A-Z][a-z]+:[A-Z][\w-]+(:[A-Z][\w-]+)?$"
 )
 
-VALID_CURRENCIES: frozenset[str] = frozenset({"COP", "USD", "EUR", "GBP", "JPY"})
+VALID_CURRENCIES: frozenset[str] = frozenset({
+    "COP", "USD", "EUR", "GBP", "JPY",
+    "CAD", "AUD", "CHF", "MXN", "BRL", "INR", "CNY",
+})
 
 # Per-currency decimal precision (from proposal — contract f)
 # Currencies with 0 decimals: COP, JPY
-# Currencies with 2 decimals: USD, EUR, GBP
+# Currencies with 2 decimals: USD, EUR, GBP, CAD, AUD, CHF, MXN, BRL, INR, CNY
 PER_CURRENCY_DECIMALS: dict[str, int] = {
     "COP": 0,
     "JPY": 0,
     "USD": 2,
     "EUR": 2,
     "GBP": 2,
+    "CAD": 2,
+    "AUD": 2,
+    "CHF": 2,
+    "MXN": 2,
+    "BRL": 2,
+    "INR": 2,
+    "CNY": 2,
 }
 
 
@@ -60,12 +70,12 @@ def validate_account_name(name: str) -> str:
 
 
 def validate_currency(code: str) -> str:
-    """Validate a currency ISO 4217 code (Wave 1: COP/USD/EUR/GBP/JPY only)."""
+    """Validate a currency ISO 4217 code."""
     upper = code.upper()
     if upper not in VALID_CURRENCIES:
         raise InvalidCurrency(
             f"Unsupported currency: '{code}'. "
-            f"Wave 1 supports: {', '.join(sorted(VALID_CURRENCIES))}"
+            f"Supported: {', '.join(sorted(VALID_CURRENCIES))}"
         )
     return upper
 

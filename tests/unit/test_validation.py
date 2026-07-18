@@ -217,6 +217,26 @@ class TestPerCurrencyDecimals:
         with pytest.raises(KeyError):
             PER_CURRENCY_DECIMALS["ARS"]
 
+    def test_extended_to_12_currencies(self) -> None:
+        """PER_CURRENCY_DECIMALS has all 12 currencies with correct precision."""
+        expected = {
+            "COP": 0,
+            "JPY": 0,
+            "USD": 2,
+            "EUR": 2,
+            "GBP": 2,
+            "CAD": 2,
+            "AUD": 2,
+            "CHF": 2,
+            "MXN": 2,
+            "BRL": 2,
+            "INR": 2,
+            "CNY": 2,
+        }
+        assert len(PER_CURRENCY_DECIMALS) == len(expected)
+        for ccy, prec in expected.items():
+            assert PER_CURRENCY_DECIMALS[ccy] == prec, f"{ccy} expected {prec}"
+
 
 @pytest.mark.unit
 class TestQuantizeForCurrency:
