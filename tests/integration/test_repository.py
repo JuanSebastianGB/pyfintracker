@@ -21,6 +21,7 @@ from pyfintracker.repository import (
     get_account_by_id,
     get_account_by_name,
     list_accounts,
+    upsert_account,
 )
 
 
@@ -214,3 +215,73 @@ class TestAccountHasPostings:
         assert account_has_postings(connection, checking_id) is True
         # Salary account should still have no postings
         assert account_has_postings(connection, salary_id) is False
+
+
+@pytest.mark.integration
+class TestUpsertAccount:
+    """Coverage gap T-Q5: repository.upsert_account(name, currency) -> Account.
+
+    Returns the existing account when found, otherwise creates a new one
+    with kind/depth derived from the colon-separated name.
+    """
+
+    def test_returns_existing_account(self, connection: Connection) -> None:
+        """When name exists, returns the existing row unchanged (no new insert)."""
+        existing = get_account_by_name(connection, "Assets:Checking")
+        assert existing is not None
+        original_id = existing.id
+
+        result = upsert_account(connection, "Assets:Checking", "COP")
+
+        assert result.id == original_id
+        assert result.name == "Assets:Checking"
+        assert result.currency == "COP"
+
+        # No duplicate row created
+        accounts = list_accounts(connection)
+        assert sum(1 for a in accounts if a.name == "Assets:Checking") == 1
+
+    def test_creates_new_account_when_missing(self, connection: Connection) -> None:
+        """When name is new, creates the account and returns it with a fresh id."""
+        result = upsert_account(connection, "Assets:NewSavings", "COP")
+
+        assert result.id is not None
+        assert result.name == "Assets:NewSavings"
+        assert result.currency == "COP"
+        # Kind auto-derived from first segment, depth from colon count
+        assert result.kind == "Assets"
+        assert result.depth == 1
+
+        # Persisted in DB
+        stored = get_account_by_name(connection, "Assets:NewSavings")
+        assert stored is not None
+        assert stored.id == result.id
+
+    def test_derives_kind_and_depth_multi_level(self, connection: Connection) -> None:
+        """Multi-level names derive kind from first segment, depth from colon count."""
+        result = upsert_account(connection, "Expenses:Food:Groceries", "COP")
+
+        assert result.kind == "Expenses"
+        assert result.depth == 2  # 2 colons → depth 2
+
+    def test_uses_provided_currency_on_create(self, connection: Connection) -> None:
+        """Newly created accounts honour the currency passed in."""
+        result = upsert_account(connection, "Assets:FxAccount", "USD")
+
+        assert result.currency == "USD"
+        stored = get_account_by_name(connection, "Assets:FxAccount")
+        assert stored is not None
+        assert stored.currency == "USD"
+
+    def test_upsert_is_idempotent(self, connection: Connection) -> None:
+        """Calling upsert twice for the same name returns the same row."""
+        first = upsert_account(connection, "Income:Freelance", "COP")
+        second = upsert_account(connection, "Income:Freelance", "COP")
+
+        assert first.id == second.id
+
+        # Still only one row in DB
+        count = connection.execute(
+            text("SELECT COUNT(*) FROM accounts WHERE name = 'Income:Freelance'"),
+        ).scalar()
+        assert count == 1
