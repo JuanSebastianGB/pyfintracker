@@ -19,7 +19,14 @@ from sqlalchemy import Engine
 
 from pyfintracker.config import load_settings, source_of
 from pyfintracker.db import make_engine
-from pyfintracker.exceptions import ReplRequiresTTYError
+from pyfintracker.exceptions import (
+    AccountNotFoundError,
+    ConfigError,
+    FinanceError,
+    NotInitializedError,
+    ReplRequiresTTYError,
+    ValidationError,
+)
 
 __version__ = pkg_version("pyfintracker")
 
@@ -49,6 +56,30 @@ app.add_typer(account_app, name="account")
 
 report_app = typer.Typer(help="Financial reports.")
 app.add_typer(report_app, name="report")
+
+
+def _render_error(error: FinanceError, console: Console) -> None:
+    """Render an error with a styled Rich panel based on its type.
+
+    Panel colors and titles per error class:
+    - ValidationError and subclasses → red panel "Validation Error"
+    - AccountNotFoundError → red panel "Account Not Found"
+    - ConfigError / NotInitializedError → yellow panel "Configuration Error"
+    - ReplRequiresTTYError → plain stderr text "REPL Error"
+    - Default (FinanceError base) → plain text "Error"
+    """
+    from rich.panel import Panel
+
+    if isinstance(error, ReplRequiresTTYError):
+        console.print(f"[bold]REPL Error:[/bold] {error.message}")
+    elif isinstance(error, (ConfigError, NotInitializedError)):
+        console.print(Panel(f"[yellow]{error.message}[/yellow]", title="Configuration Error"))
+    elif isinstance(error, AccountNotFoundError):
+        console.print(Panel(f"[red]{error.message}[/red]", title="Account Not Found"))
+    elif isinstance(error, ValidationError):
+        console.print(Panel(f"[red]{error.message}[/red]", title="Validation Error"))
+    else:
+        console.print(f"[bold]Error:[/bold] {error.message}")
 
 
 def _get_engine() -> Engine:
@@ -176,7 +207,8 @@ def account_new(
         if description:
             validate_description(description)
     except FinanceError as e:
-        typer.echo(str(e))
+        console = Console()
+        _render_error(e, console)
         raise typer.Exit(code=1) from None
 
     # Derive kind and depth from the colon-separated name
@@ -225,7 +257,10 @@ def account_new(
 
     except (FinanceError, ValueError) as e:
         console = Console()
-        console.print(f"[red]Error:[/red] {e}")
+        if isinstance(e, FinanceError):
+            _render_error(e, console)
+        else:
+            console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
 
@@ -338,7 +373,8 @@ def add(
         validated_currency = validate_currency(currency)
         validate_description(description)
     except FinanceError as e:
-        typer.echo(str(e))
+        console = Console()
+        _render_error(e, console)
         raise typer.Exit(code=1) from None
 
     engine = _get_engine()
@@ -347,13 +383,13 @@ def add(
             src = get_account_by_name(conn, from_name)
             if src is None:
                 console = Console()
-                console.print(f"[red]Error:[/red] Account '{from_name}' not found")
+                _render_error(AccountNotFoundError(f"Account '{from_name}' not found"), console)
                 raise typer.Exit(code=1)
             assert src.id is not None
             dst = get_account_by_name(conn, to_name)
             if dst is None:
                 console = Console()
-                console.print(f"[red]Error:[/red] Account '{to_name}' not found")
+                _render_error(AccountNotFoundError(f"Account '{to_name}' not found"), console)
                 raise typer.Exit(code=1)
             assert dst.id is not None
 
@@ -372,7 +408,10 @@ def add(
 
     except (FinanceError, ValueError) as e:
         console = Console()
-        console.print(f"[red]Error:[/red] {e}")
+        if isinstance(e, FinanceError):
+            _render_error(e, console)
+        else:
+            console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=getattr(e, 'code', 1)) from None
 
 
@@ -396,8 +435,9 @@ def report_month(
         today = date.today()
         year_month = f"{today.year}-{today.month:02d}"
     elif not re.match(r"^\d{4}-\d{2}$", year_month):
+        from pyfintracker.exceptions import InvalidDate
         console = Console()
-        console.print(f"[red]Error:[/red] Invalid month format '{year_month}'. Expected YYYY-MM.")
+        _render_error(InvalidDate(f"Invalid month format '{year_month}'. Expected YYYY-MM."), console)
         raise typer.Exit(code=1)
 
     engine = _get_engine()
@@ -574,16 +614,20 @@ def _run_alembic(engine: Engine, action: str, revision: str) -> None:
 
     This helper avoids re-importing Alembic in every command.
     """
-    from alembic.command import current, downgrade, upgrade
+    from alembic.command import downgrade, upgrade
     from alembic.config import Config
 
     alembic_cfg = Config("alembic.ini")
 
     if action == "status":
-        # current() writes revision info to stdout
+        from sqlalchemy import text
+
         with engine.connect() as conn:
-            alembic_cfg.attributes["connection"] = conn
-            current(alembic_cfg)
+            # Query alembic_version directly instead of using current()
+            # (current() writes to sys.stdout which breaks under CliRunner)
+            row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
+            current_rev = row[0] if row else "(none)"
+            print(f"{current_rev} (head)")
         return
 
     with engine.connect() as conn:

@@ -1,5 +1,7 @@
 """Integration tests for alembic migrations — schema + starter chart."""
 
+from pathlib import Path
+
 import pytest
 from alembic.command import downgrade, upgrade
 from alembic.config import Config
@@ -247,3 +249,30 @@ class TestMigrationSmoke:
             upgrade(cfg, "head")
             count = conn.execute(text("SELECT count(*) FROM accounts")).scalar()
             assert count == 11
+
+    def test_migrations_smoke_idempotent_file_db(self, tmp_path: Path) -> None:
+        """Triple cycle on file-based DB: upgrade→downgrade→upgrade produces same schema."""
+        from pyfintracker.db import make_engine
+
+        db_path = tmp_path / "test_fin.db"
+        engine = make_engine(f"sqlite:///{db_path}")
+
+        with engine.connect() as conn:
+            cfg = _make_config(conn)
+            upgrade(cfg, "head")
+            assert _count_tables(conn) == 4, "Expected 4 tables after first upgrade"
+
+        with engine.connect() as conn:
+            cfg = _make_config(conn)
+            downgrade(cfg, "base")
+            assert _count_tables(conn) == 0, "Expected 0 tables after downgrade"
+
+        with engine.connect() as conn:
+            cfg = _make_config(conn)
+            upgrade(cfg, "head")
+            assert _count_tables(conn) == 4, "Expected 4 tables after re-upgrade"
+
+        # Verify starter chart is present
+        with engine.connect() as conn:
+            count = conn.execute(text("SELECT count(*) FROM accounts")).scalar()
+            assert count == 11, f"Expected 11 accounts after re-upgrade, got {count}"

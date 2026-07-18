@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/*"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Install Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Lint with ruff
+        run: uv run ruff check src/pyfintracker/
+
+      - name: Type-check with mypy
+        run: uv run mypy src/pyfintracker/
+
+      - name: Test with pytest
+        run: uv run pytest
