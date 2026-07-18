@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -135,9 +135,56 @@ class Transaction:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Rate:
+    """An FX rate between two currencies.
+
+    Maps to the 'rates' DB table with column mapping:
+        from_ccy → base_currency
+        to_ccy → target_currency
+    """
+
+    date: date
+    from_ccy: str = ""
+    to_ccy: str = ""
+    rate: Decimal = Decimal("0")
+    source: str = "frankfurter"
+    id: int | None = None
+    fetched_at: datetime | None = None
+
+    def to_row(self) -> dict[str, object]:
+        """Convert to dict for SQLAlchemy Core insertion."""
+        d: dict[str, object] = {
+            "base_currency": self.from_ccy,
+            "target_currency": self.to_ccy,
+            "rate": self.rate,
+            "date": self.date,
+            "source": self.source,
+        }
+        if self.id is not None:
+            d["id"] = self.id
+        if self.fetched_at is not None:
+            d["fetched_at"] = self.fetched_at
+        return d
+
+    @staticmethod
+    def from_row(row: Mapping[str, Any]) -> Rate:
+        """Reconstruct from a SQLAlchemy result row."""
+        return Rate(
+            id=row.get("id"),
+            date=row["date"],
+            from_ccy=row["base_currency"],
+            to_ccy=row["target_currency"],
+            rate=row["rate"],
+            fetched_at=row.get("fetched_at"),
+            source=row.get("source", "frankfurter"),
+        )
+
+
 __all__ = [
     "ROOT_TYPES",
     "Account",
     "Posting",
+    "Rate",
     "Transaction",
 ]

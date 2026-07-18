@@ -232,3 +232,108 @@ class TestTransaction:
         row = original.to_row()
         restored = Transaction.from_row(row)
         assert restored == original
+
+
+#
+# ── T-A.2: Rate frozen dataclass ──────────────────────────────────────────────
+#
+
+
+@pytest.mark.unit
+class TestRate:
+    """T-A.2: Rate frozen dataclass with to_row/from_row."""
+
+    def test_rate_construction(self) -> None:
+        """Rate minimal construction."""
+        from datetime import date
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56"))
+        assert r.date == date(2026, 7, 18)
+        assert r.from_ccy == "USD"
+        assert r.to_ccy == "COP"
+        assert r.rate == Decimal("3255.56")
+        assert r.fetched_at is None
+        assert r.source == "frankfurter"
+        assert r.id is None
+
+    def test_rate_is_decimal(self) -> None:
+        """Rate.rate is Decimal type (float enforced by mypy)."""
+        from datetime import date
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56"))
+        assert type(r.rate) is Decimal
+
+    def test_rate_is_frozen(self) -> None:
+        """Rate is immutable after construction."""
+        from datetime import date
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("1"))
+        with pytest.raises(AttributeError):
+            r.rate = Decimal("2")  # type: ignore[misc]
+
+    def test_rate_to_row_maps_ccy_columns(self) -> None:
+        """to_row maps from_ccy→base_currency, to_ccy→target_currency."""
+        from datetime import date, datetime
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        r = Rate(
+            id=1,
+            date=date(2026, 7, 18),
+            from_ccy="USD",
+            to_ccy="COP",
+            rate=Decimal("3255.56"),
+            fetched_at=datetime(2026, 7, 18, 12, 0, 0),
+        )
+        row = r.to_row()
+        assert row["base_currency"] == "USD"
+        assert row["target_currency"] == "COP"
+        assert row["rate"] == Decimal("3255.56")
+        assert row["date"] == date(2026, 7, 18)
+        assert row["source"] == "frankfurter"
+        assert row["fetched_at"] == datetime(2026, 7, 18, 12, 0, 0)
+
+    def test_rate_from_row_roundtrip(self) -> None:
+        """Rate.from_row(to_row()) preserves all fields byte-exact."""
+        from datetime import date, datetime
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        original = Rate(
+            id=1,
+            date=date(2026, 7, 18),
+            from_ccy="USD",
+            to_ccy="COP",
+            rate=Decimal("3255.56"),
+            fetched_at=datetime(2026, 7, 18, 12, 0, 0),
+        )
+        row = original.to_row()
+        restored = Rate.from_row(row)
+        assert restored == original
+        assert type(restored.rate) is Decimal
+
+    def test_rate_from_row_without_id(self) -> None:
+        """from_row works without id (None on insert)."""
+        from datetime import date
+        from decimal import Decimal
+        from pyfintracker.models import Rate
+
+        row = {
+            "date": date(2026, 7, 18),
+            "base_currency": "USD",
+            "target_currency": "COP",
+            "rate": Decimal("3255.56"),
+            "source": "frankfurter",
+        }
+        r = Rate.from_row(row)
+        assert r.id is None
+        assert r.from_ccy == "USD"
+        assert r.to_ccy == "COP"
+        assert r.rate == Decimal("3255.56")
+        assert r.fetched_at is None
