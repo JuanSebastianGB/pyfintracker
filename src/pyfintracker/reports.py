@@ -55,6 +55,37 @@ class BalanceReport(BaseModel):
     net_worth: Decimal
 
 
+def _to_lines(entries: list[dict[str, Any]]) -> list[MonthlyLine]:
+    """Aggregate entries by (day, label) and compute a running balance.
+
+    Entries with the same (day, label) key are summed. Output is sorted by
+    (day, label) ascending; the balance field is the cumulative sum of
+    amounts in that sorted order.
+    """
+    if not entries:
+        return []
+
+    aggregated: dict[tuple[int, str], Decimal] = {}
+    for e in entries:
+        key = (e["day"], e["label"])
+        aggregated[key] = aggregated.get(key, Decimal("0")) + e["amount"]
+
+    sorted_keys = sorted(aggregated, key=lambda k: (k[0], k[1]))
+    running = Decimal("0")
+    lines: list[MonthlyLine] = []
+    for day, label in sorted_keys:
+        running += aggregated[(day, label)]
+        lines.append(
+            MonthlyLine(
+                day=day,
+                label=label,
+                amount=aggregated[(day, label)],
+                balance=running,
+            )
+        )
+    return lines
+
+
 def compute_monthly_report(
     conn: Connection, year_month: str
 ) -> MonthlyReport:
@@ -112,32 +143,6 @@ def compute_monthly_report(
         elif kind == "Expenses":
             # Expense postings are debits (positive) — use as-is
             expense_entries.append({"day": day, "label": label, "amount": amount})
-
-    # Build MonthlyLine groups per day/account
-    def _to_lines(entries: list[dict[str, Any]]) -> list[MonthlyLine]:
-        """Aggregate entries by day+label and compute running balance."""
-        if not entries:
-            return []
-
-        aggregated: dict[tuple[int, str], Decimal] = {}
-        for e in entries:
-            key = (e["day"], e["label"])
-            aggregated[key] = aggregated.get(key, Decimal("0")) + e["amount"]
-
-        sorted_keys = sorted(aggregated, key=lambda k: (k[0], k[1]))
-        running = Decimal("0")
-        lines: list[MonthlyLine] = []
-        for day, label in sorted_keys:
-            running += aggregated[(day, label)]
-            lines.append(
-                MonthlyLine(
-                    day=day,
-                    label=label,
-                    amount=aggregated[(day, label)],
-                    balance=running,
-                )
-            )
-        return lines
 
     income_lines = _to_lines(income_entries)
     expense_lines = _to_lines(expense_entries)

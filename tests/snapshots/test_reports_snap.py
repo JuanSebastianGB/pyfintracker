@@ -47,8 +47,8 @@ class TestRenderMonthly:
                     MonthlyLine(day=day, label=label, amount=Decimal(amt), balance=Decimal(bal))
                 )
 
-        income_total = sum((l.amount for l in income_lines), Decimal("0"))
-        expense_total = sum((l.amount for l in expense_lines), Decimal("0"))
+        income_total = sum((line.amount for line in income_lines), Decimal("0"))
+        expense_total = sum((line.amount for line in expense_lines), Decimal("0"))
 
         return MonthlyReport(
             year_month="2024-01",
