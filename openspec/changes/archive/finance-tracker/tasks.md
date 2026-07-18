@@ -1,7 +1,7 @@
 ---
 type: tasks
 id: finance-tracker-tasks
-status: draft
+status: archived
 tags: [python, cli, finance, double-entry, sqlite, mvp, tasks]
 parent_proposal: finance-tracker
 parent_spec: finance-tracker-spec
