@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Lint with ruff
-        run: uv run ruff check src/pyfintracker/
+        run: uv run ruff check src/pyfintracker/ tests/
 
       - name: Type-check with mypy
         run: uv run mypy src/pyfintracker/

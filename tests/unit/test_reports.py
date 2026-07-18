@@ -305,9 +305,10 @@ class TestComputeMonthlyReport:
         """Invalid year_month format raises ValueError."""
         from pyfintracker.reports import compute_monthly_report
 
-        with get_session(reports_engine) as conn:
-            with pytest.raises(ValueError, match="Invalid year_month format"):
-                compute_monthly_report(conn, "2024/01")
+        with get_session(reports_engine) as conn, pytest.raises(
+            ValueError, match="Invalid year_month format"
+        ):
+            compute_monthly_report(conn, "2024/01")
 
     def test_multiple_income_same_day(self, reports_engine, seed_simple_month) -> None:
         """Multiple income entries on the same day are grouped correctly."""
@@ -351,7 +352,7 @@ class TestComputeBalance:
             report = compute_balance(conn)
 
         # Assets:Checking should have positive balance
-        checking = [l for l in report.lines if l.account_name == "Assets:Checking"]
+        checking = [line for line in report.lines if line.account_name == "Assets:Checking"]
         assert len(checking) == 1
         # 3000000 (salary) - 1200000 (rent) - 250000 (groceries) = 1550000
         assert checking[0].balance == Decimal("1550000")
@@ -364,7 +365,7 @@ class TestComputeBalance:
         with get_session(reports_engine) as conn:
             report = compute_balance(conn)
 
-        names = [l.account_name for l in report.lines]
+        names = [line.account_name for line in report.lines]
         assert "Income:Salary" not in names
         assert "Expenses:Rent" not in names
         assert "Expenses:Food:Groceries" not in names
@@ -392,7 +393,7 @@ class TestComputeBalance:
         with get_session(reports_engine) as conn:
             report = compute_balance(conn)
 
-        names = [l.account_name for l in report.lines]
+        names = [line.account_name for line in report.lines]
         assert "Assets:Checking" in names
         # Savings has zero balance — should be excluded
         assert "Assets:Savings" not in names, "Zero-balance accounts should be excluded"
@@ -423,7 +424,7 @@ class TestComputeBalance:
         with get_session(reports_engine) as conn:
             report = compute_balance(conn)
 
-        cc = [l for l in report.lines if l.account_name == "Liabilities:CreditCard"]
+        cc = [line for line in report.lines if line.account_name == "Liabilities:CreditCard"]
         assert len(cc) == 1
         assert cc[0].balance == Decimal("500000")  # positive convention
         assert cc[0].account_kind == "Liabilities"
@@ -440,5 +441,5 @@ class TestComputeBalance:
         with get_session(reports_engine) as conn:
             report = compute_balance(conn)
 
-        names = [l.account_name for l in report.lines]
+        names = [line.account_name for line in report.lines]
         assert "Assets:Empty" not in names
