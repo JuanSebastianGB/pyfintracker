@@ -389,6 +389,11 @@ def _parse_repl_amount(raw: str) -> Decimal:
     return amount
 
 
+def _show_diff(balance: Decimal, currency: str) -> str:
+    """Return a formatted guidance line showing the current imbalance."""
+    return f"Balance: {balance:+} {currency} (need {-balance:+} to balance)"
+
+
 def _suggest_accounts(name: str, available: list[str]) -> list[str]:
     """Find closest matching account names (case-insensitive substring match)."""
     lower = name.lower()
@@ -469,6 +474,9 @@ def repl_add_postings(
         if balance == Decimal("0") and len(postings) >= 2:
             console.print("[green]✓ Transaction balanced[/green]")
             break
+
+        if balance != Decimal("0") and len(postings) >= 2:
+            console.print(_show_diff(balance, currency))
 
     txn = Transaction(date=txn_date, description=description, currency=currency)
     return txn, postings

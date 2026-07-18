@@ -220,6 +220,42 @@ class TestAddRepl:
         total = sum(self._get_postings(db_path))
         assert total == Decimal("0")
 
+    def test_repl_unbalanced_fix(self, tmp_path: Path, repl_runner: TTYCliRunner) -> None:
+        """T-5.12: Unbalanced postings show guidance and user can fix."""
+        from pyfintracker.cli import app
+
+        db_path = _init_and_seed(tmp_path, repl_runner)
+
+        # First two postings: 50000 - 20000 = +30000 (unbalanced)
+        # Third posting adds -30000 → balanced
+        # (postings has UNIQUE(transaction_id, account_id), so each account appears once)
+        input_data = "\n".join([
+            "2024-01-15",
+            "Unbalanced test",
+            "COP",
+            "Expenses:Food",
+            "50000",
+            "Assets:Wallet",
+            "-20000",
+            "Assets:Cash",       # third posting to fix (starter chart account)
+            "-30000",
+        ])
+
+        result = repl_runner.invoke(
+            app, ["add"],
+            input=input_data,
+            env={"FIN_DB_PATH": str(db_path)},
+        )
+
+        assert result.exit_code == 0, result.stdout
+        # Should show imbalance guidance (not just final "Transaction balanced")
+        # Guidance format: "Balance: +30000 COP (need -30000 to balance)"
+        assert "Balance: " in result.stdout or "need " in result.stdout
+        # Final transaction should be balanced
+        total = sum(self._get_postings(db_path))
+        assert total == Decimal("0")
+        assert len(self._get_postings(db_path)) == 3
+
     def test_repl_partial_flags_error(self, tmp_path: Path, cli_runner: CliRunner) -> None:
         """Partial flags (some but not all) show error."""
         from pyfintracker.cli import app
