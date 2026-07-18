@@ -7,11 +7,14 @@ from pyfintracker.exceptions import (
     ConfigError,
     CurrencyMismatchError,
     FinanceError,
+    FxUnavailableError,
     InvalidAccountName,
     InvalidAmount,
     InvalidCurrency,
+    InvalidCurrencyError,
     InvalidDate,
     NotInitializedError,
+    RateNotFoundError,
     ReplRequiresTTYError,
     TooFewPostings,
     UnbalancedTransaction,
@@ -75,3 +78,21 @@ def test_exit_code_mapping(exc_cls: type[FinanceError]) -> None:
 def test_inheritance_chain(exc_cls: type[FinanceError], parent: type[FinanceError]) -> None:
     """Each exception is a direct or indirect subclass of its parent."""
     assert issubclass(exc_cls, parent)
+
+
+# ── T-A.3: FX exception codes ─────────────────────────────────────────────────
+
+
+FX_EXIT_CODE_MAP: dict[type[FinanceError], int] = {
+    RateNotFoundError: 4,
+    InvalidCurrencyError: 5,
+    FxUnavailableError: 6,
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("exc_cls,expected_code", FX_EXIT_CODE_MAP.items())
+def test_fx_exception_codes(exc_cls: type[FinanceError], expected_code: int) -> None:
+    """FX exceptions have correct exit codes."""
+    instance = exc_cls()
+    assert instance.code == expected_code, f"{exc_cls.__name__}: expected {expected_code}, got {instance.code}"
