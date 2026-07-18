@@ -6,6 +6,9 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 from sqlalchemy import Connection, text
 
 
@@ -203,6 +206,111 @@ def compute_balance(conn: Connection) -> BalanceReport:
     return BalanceReport(lines=lines, net_worth=net_worth)
 
 
+# ── Render functions ───────────────────────────────────────────────────────
+
+
+def _fmt(amount: Decimal) -> str:
+    """Format a Decimal amount with thousands separator."""
+    # ponytail: simple string formatting, no locale
+    s = f"{amount:,.2f}"
+    if s.endswith(".00"):
+        s = s[:-3]
+    return s
+
+
+def _style_amount(amount: Decimal, console: Console) -> str:
+    """Return a Rich-markup string for an amount, green if positive else red."""
+    color = "green" if amount >= 0 else "red"
+    return f"[{color}]{_fmt(amount)}[/{color}]"
+
+
+def render_monthly_report(report: MonthlyReport, console: Console) -> None:
+    """Render a ``MonthlyReport`` as a Rich layout.
+
+    Prints:
+        - Title panel: "Monthly Report — YYYY-MM"
+        - Income table (Day | Account | Amount | Balance)
+        - Expenses table (Day | Account | Amount | Balance)
+        - Net summary line
+
+    Args:
+        report: The monthly report to render.
+        console: Rich console to print to.
+    """
+    # ── Title ───────────────────────────────────────────────────────────
+    console.print(Panel(f"Monthly Report — {report.year_month}"))
+
+    # ── Helper to render one section ────────────────────────────────────
+    def _render_section(title: str, lines: list[MonthlyLine], total: Decimal) -> None:
+        if not lines:
+            console.print(f"\n[bold]{title}[/bold] — [dim]No transactions[/dim]")
+            return
+
+        table = Table(title=title, title_style="bold")
+        table.add_column("Day", style="dim", justify="right")
+        table.add_column("Account", style="cyan")
+        table.add_column("Amount", justify="right")
+        table.add_column("Balance", justify="right")
+
+        for line in lines:
+            table.add_row(
+                str(line.day),
+                line.label,
+                _style_amount(line.amount, console),
+                _style_amount(line.balance, console),
+            )
+
+        # Footer: bold total
+        table.add_row(
+            "", "[bold]Total[/bold]", _style_amount(total, console), "",  # last col empty
+        )
+        table.columns[2].footer = _fmt(total)
+        console.print(table)
+
+    _render_section("Income", report.income_lines, report.income_total)
+    _render_section("Expenses", report.expense_lines, report.expense_total)
+
+    # ── Net summary ─────────────────────────────────────────────────────
+    net_color = "green" if report.net >= 0 else "red"
+    console.print(f"\n[bold]Net: [{net_color}]{_fmt(report.net)}[/{net_color}][/bold]")
+
+
+def render_balance(report: BalanceReport, console: Console) -> None:
+    """Render a ``BalanceReport`` as a grouped Rich table.
+
+    Groups lines by ``account_kind`` (Assets, Liabilities, Equity), prints
+    a sub-table per group, then a bold net-worth footer.
+
+    Args:
+        report: The balance report to render.
+        console: Rich console to print to.
+    """
+    # ── Title ───────────────────────────────────────────────────────────
+    console.print(Panel("[bold]Balance Report[/bold]"))
+
+    # Group lines by account_kind
+    groups: dict[str, list[BalanceLine]] = {}
+    for line in report.lines:
+        groups.setdefault(line.account_kind, []).append(line)
+
+    sorted_kinds = sorted(groups.keys())
+
+    for kind in sorted_kinds:
+        lines = groups[kind]
+        table = Table(title=kind, title_style="bold")
+        table.add_column("Account", style="cyan")
+        table.add_column("Balance", justify="right")
+
+        for line in lines:
+            table.add_row(line.account_name, _style_amount(line.balance, console))
+
+        console.print(table)
+
+    # ── Net worth footer ────────────────────────────────────────────────
+    nw_color = "green" if report.net_worth >= 0 else "red"
+    console.print(f"[bold]Net worth: [{nw_color}]{_fmt(report.net_worth)}[/{nw_color}][/bold]")
+
+
 __all__ = [
     "BalanceLine",
     "BalanceReport",
@@ -210,4 +318,6 @@ __all__ = [
     "MonthlyReport",
     "compute_balance",
     "compute_monthly_report",
+    "render_balance",
+    "render_monthly_report",
 ]

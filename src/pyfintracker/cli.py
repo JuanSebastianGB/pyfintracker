@@ -44,6 +44,12 @@ def _main(ctx: typer.Context) -> None:
 account_app = typer.Typer(help="Manage accounts.")
 app.add_typer(account_app, name="account")
 
+# ── Report sub-app ───────────────────────────────────────────────────────────
+
+
+report_app = typer.Typer(help="Financial reports.")
+app.add_typer(report_app, name="report")
+
 
 def _get_engine() -> Engine:
     """Create a SQLAlchemy engine from the configured db_path."""
@@ -370,6 +376,62 @@ def add(
         raise typer.Exit(code=getattr(e, 'code', 1)) from None
 
 
+# ── Report sub-app commands ──────────────────────────────────────────────────
+
+
+@report_app.command("month")
+def report_month(
+    month: str = typer.Option("", "--month", help="Month in YYYY-MM format (default: current)"),
+) -> None:
+    """Show income/expense report for a month."""
+    import re
+    from datetime import date
+
+    from rich.console import Console
+
+    from pyfintracker.reports import compute_monthly_report, render_monthly_report
+
+    year_month = month
+    if not year_month:
+        today = date.today()
+        year_month = f"{today.year}-{today.month:02d}"
+    elif not re.match(r"^\d{4}-\d{2}$", year_month):
+        console = Console()
+        console.print(f"[red]Error:[/red] Invalid month format '{year_month}'. Expected YYYY-MM.")
+        raise typer.Exit(code=1)
+
+    engine = _get_engine()
+    console = Console()
+    with engine.begin() as conn:
+        report = compute_monthly_report(conn, year_month)
+    render_monthly_report(report, console)
+
+
+@report_app.command("balance")
+def balance(
+    account_name: str = typer.Argument(None, help="Filter by account name (optional)"),
+) -> None:
+    """Show account balances and net worth."""
+    from rich.console import Console
+
+    from pyfintracker.reports import compute_balance, render_balance
+
+    engine = _get_engine()
+    console = Console()
+    with engine.begin() as conn:
+        report = compute_balance(conn)
+
+    if account_name:
+        lower = account_name.lower()
+        filtered_lines = [ln for ln in report.lines if lower in ln.account_name.lower()]
+        report = report.__class__(
+            lines=filtered_lines,
+            net_worth=sum((ln.balance for ln in filtered_lines), Decimal("0")),
+        )
+
+    render_balance(report, console)
+
+
 def _parse_repl_amount(raw: str) -> Decimal:
     """Parse REPL amount input: strip commas, reject zero and non-numeric."""
     import re
@@ -536,9 +598,12 @@ __all__ = [
     "account_app",
     "add",
     "app",
+    "balance",
     "config_show",
     "init",
     "migrate",
     "repl_add_postings",
+    "report_app",
+    "report_month",
     "version",
 ]
