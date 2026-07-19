@@ -19,7 +19,7 @@ env:
 
 jobs:
   test:
-    name: test (Python ${{ env.PYTHON_VERSION }})
+    name: test (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
