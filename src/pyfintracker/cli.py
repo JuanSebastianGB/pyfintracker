@@ -155,7 +155,7 @@ def config_show() -> None:
     data = {}
     for field in [
         "db_path",
-        "default_currency",
+        "display_currency",
         "account_name_max_length",
         "description_max_length",
         "snapshot_width",

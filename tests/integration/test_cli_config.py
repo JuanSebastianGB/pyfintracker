@@ -17,20 +17,20 @@ def test_config_show_defaults(tmp_path: Path, cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(app, ["config-show"])
     assert result.exit_code == 0, result.stdout
     assert "db_path" in result.stdout
-    assert "default_currency" in result.stdout
+    assert "display_currency" in result.stdout
     assert "[default]" in result.stdout
     # Default currency is COP
     assert "COP" in result.stdout
 
 
 def test_config_env_override(tmp_path: Path, cli_runner: CliRunner) -> None:
-    """``FIN_DEFAULT_CURRENCY`` env var overrides the default."""
+    """``FIN_DISPLAY_CURRENCY`` env var overrides the default."""
     from pyfintracker.cli import app
 
     result = cli_runner.invoke(
         app,
         ["config-show"],
-        env={"FIN_DEFAULT_CURRENCY": "EUR"},
+        env={"FIN_DISPLAY_CURRENCY": "EUR"},
     )
     assert result.exit_code == 0, result.stdout
     assert "EUR" in result.stdout
@@ -46,7 +46,7 @@ def test_config_toml_override(tmp_path: Path, cli_runner: CliRunner) -> None:
     config_dir.mkdir(parents=True, exist_ok=True)
     toml_path = config_dir / "config.toml"
     original = toml_path.read_text() if toml_path.exists() else None
-    toml_path.write_text('default_currency = "GBP"\n')
+    toml_path.write_text('display_currency = "GBP"\n')
 
     try:
         result = cli_runner.invoke(app, ["config-show"])
@@ -69,13 +69,13 @@ def test_config_env_overrides_toml(tmp_path: Path, cli_runner: CliRunner) -> Non
     config_dir.mkdir(parents=True, exist_ok=True)
     toml_path = config_dir / "config.toml"
     original = toml_path.read_text() if toml_path.exists() else None
-    toml_path.write_text('default_currency = "GBP"\n')
+    toml_path.write_text('display_currency = "GBP"\n')
 
     try:
         result = cli_runner.invoke(
             app,
             ["config-show"],
-            env={"FIN_DEFAULT_CURRENCY": "JPY"},
+            env={"FIN_DISPLAY_CURRENCY": "JPY"},
         )
         assert result.exit_code == 0, result.stdout
         assert "JPY" in result.stdout, "Env should win over TOML"

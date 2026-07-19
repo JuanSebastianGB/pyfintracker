@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from pydantic_settings import BaseSettings
 
 from pyfintracker import config
@@ -19,7 +20,7 @@ class TestSettingsDefaults:
     def test_settings_defaults(self) -> None:
         """Settings can be instantiated with no arguments (uses defaults)."""
         s = config.Settings()
-        assert s.default_currency == "COP"
+        assert s.display_currency == "COP"
         assert s.account_name_max_length == 64
         assert s.description_max_length == 256
         assert s.snapshot_width == 120
@@ -30,10 +31,17 @@ class TestSettingsDefaults:
         expected = Path("~/.local/share/fin/fin.db").expanduser()
         assert s.db_path == expected
 
-    def test_default_currency_default(self) -> None:
-        """default_currency defaults to COP."""
+    def test_display_currency_default(self) -> None:
+        """display_currency defaults to COP."""
         s = config.Settings()
-        assert s.default_currency == "COP"
+        assert s.display_currency == "COP"
+
+    def test_default_currency_property_deprecated(self) -> None:
+        """default_currency property still works (deprecated shim)."""
+        s = config.Settings()
+        with pytest.warns(DeprecationWarning, match="display_currency"):
+            val = s.default_currency
+        assert val == "COP"
 
     def test_account_name_max_length_default(self) -> None:
         """account_name_max_length defaults to 64."""
@@ -59,34 +67,40 @@ class TestSettingsDefaults:
 class TestLoadSettings:
     """Precedence chain: defaults < TOML < env < CLI."""
 
-    def test_default_currency_default(self) -> None:
+    def test_display_currency_default(self) -> None:
         """Default 'COP' if no override."""
         s = config.load_settings()
-        assert s.default_currency == "COP"
+        assert s.display_currency == "COP"
 
     def test_env_overrides_default(self, monkeypatch) -> None:
-        """Env var FIN_DEFAULT_CURRENCY=GBP overrides default."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        """Env var FIN_DISPLAY_CURRENCY=GBP overrides default."""
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         s = config.load_settings()
-        assert s.default_currency == "GBP"
+        assert s.display_currency == "GBP"
 
     def test_env_overrides_toml(self, monkeypatch) -> None:
         """Env var overrides TOML (if TOML file exists with a value)."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         s = config.load_settings()
-        assert s.default_currency == "GBP"
+        assert s.display_currency == "GBP"
 
     def test_cli_overrides_env(self, monkeypatch) -> None:
         """CLI override via dict overrides env."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
+        s = config.load_settings(cli_overrides={"display_currency": "EUR"})
+        assert s.display_currency == "EUR"
+
+    def test_cli_deprecated_default_currency_remapped(self, monkeypatch) -> None:
+        """CLI override with deprecated key 'default_currency' is remapped."""
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         s = config.load_settings(cli_overrides={"default_currency": "EUR"})
-        assert s.default_currency == "EUR"
+        assert s.display_currency == "EUR"
 
     def test_cli_no_override_uses_env(self, monkeypatch) -> None:
         """Without cli override, env var applies."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         s = config.load_settings()
-        assert s.default_currency == "GBP"
+        assert s.display_currency == "GBP"
 
     def test_load_settings_returns_settings_instance(self) -> None:
         """load_settings returns a Settings instance."""
@@ -125,23 +139,23 @@ class TestTomlLayer:
 
     def test_toml_overrides_default(self) -> None:
         """TOML file value overrides default when env is not set."""
-        self.toml_path.write_text('default_currency = "USD"')
+        self.toml_path.write_text('display_currency = "USD"')
         s = config.load_settings()
-        assert s.default_currency == "USD"
+        assert s.display_currency == "USD"
 
     def test_toml_overrides_default_and_env_wins(self, monkeypatch) -> None:
         """Env still wins over TOML."""
-        self.toml_path.write_text('default_currency = "USD"')
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        self.toml_path.write_text('display_currency = "USD"')
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         s = config.load_settings()
-        assert s.default_currency == "GBP"
+        assert s.display_currency == "GBP"
 
     def test_toml_not_exists_falls_back_to_default(self) -> None:
         """When TOML file does not exist, defaults apply."""
         if self.toml_path.exists():
             self.toml_path.unlink()
         s = config.load_settings()
-        assert s.default_currency == "COP"
+        assert s.display_currency == "COP"
 
 
 class TestSourceOf:
@@ -149,29 +163,29 @@ class TestSourceOf:
 
     def test_source_default(self) -> None:
         """Returns 'default' when no override."""
-        result = config.source_of("default_currency")
+        result = config.source_of("display_currency")
         assert result == "default"
 
     def test_source_env(self, monkeypatch) -> None:
         """Returns 'env' when set via FIN_* env var."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
-        result = config.source_of("default_currency")
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
+        result = config.source_of("display_currency")
         assert result == "env"
 
     def test_source_cli(self) -> None:
         """Returns 'cli' when set via cli_overrides."""
         result = config.source_of(
-            "default_currency",
-            cli_overrides={"default_currency": "EUR"},
+            "display_currency",
+            cli_overrides={"display_currency": "EUR"},
         )
         assert result == "cli"
 
     def test_source_cli_wins_over_env(self, monkeypatch) -> None:
         """CLI reported even when env also set."""
-        monkeypatch.setenv("FIN_DEFAULT_CURRENCY", "GBP")
+        monkeypatch.setenv("FIN_DISPLAY_CURRENCY", "GBP")
         result = config.source_of(
-            "default_currency",
-            cli_overrides={"default_currency": "EUR"},
+            "display_currency",
+            cli_overrides={"display_currency": "EUR"},
         )
         assert result == "cli"
 
@@ -182,8 +196,8 @@ class TestSourceOf:
         # Save existing
         saved = self.__class__.toml_path.read_text() if self.__class__.toml_path.exists() else None
         try:
-            self.__class__.toml_path.write_text('default_currency = "USD"')
-            result = config.source_of("default_currency")
+            self.__class__.toml_path.write_text('display_currency = "USD"')
+            result = config.source_of("display_currency")
             assert result == "toml"
         finally:
             if saved is not None:
