@@ -93,11 +93,12 @@ def test_convert_then_sum_equals_sum_then_convert(
 
     ulp = _ulp(target)
     # ponytail: bound by max postings per ccy (each contributing ≤1 ULP noise)
+    # plus the final quantization step on the sum (another 1 ULP).
     max_per_ccy = max(
         (sum(1 for _, cc in postings if cc == cur_ccy) for cur_ccy in by_ccy),
         default=1,
     )
-    tol = ulp * max_per_ccy
+    tol = ulp * (max_per_ccy + 1)
     assert abs(path_a - path_b_total) <= tol, (
         f"convert-then-sum={path_a} vs sum-then-convert={path_b_total} "
         f"diff={abs(path_a - path_b_total)} > {tol} "
