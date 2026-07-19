@@ -57,6 +57,23 @@ class TestUpsertRate:
         ).scalar()
         assert rows == 1
 
+    def test_upsert_returns_db_id(self, session: Connection) -> None:
+        """Returned Rate carries the DB-assigned id (≥1), not None.
+
+        Regression: catches _row_to_rate mutmut_28/35/43/44 which drop or
+        mangle ``id=r.get("id")`` — none of the surrounding tests observed
+        the id, so those mutations stayed alive.
+        """
+        r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56"))
+        returned = upsert_rate(session, r)
+
+        assert returned.id is not None
+        assert returned.id >= 1
+
+        cached = get_cached_rate(session, "USD", "COP", date(2026, 7, 18))
+        assert cached is not None
+        assert cached.id == returned.id
+
 
 @pytest.mark.integration
 class TestGetCachedRate:

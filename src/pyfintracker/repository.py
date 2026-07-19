@@ -262,11 +262,6 @@ def upsert_rate(conn: Connection, rate: Rate) -> Rate:
     return _row_to_rate(full)
 
 
-def get_rate_at_date(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> Rate | None:
-    """Alias for get_cached_rate — find rate at a specific date."""
-    return get_cached_rate(conn, from_ccy, to_ccy, on)
-
-
 def list_cached_rates(
     conn: Connection,
     *,
@@ -294,7 +289,6 @@ __all__ = [
     "get_account_by_id",
     "get_account_by_name",
     "get_cached_rate",
-    "get_rate_at_date",
     "list_accounts",
     "list_cached_rates",
     "upsert_account",
