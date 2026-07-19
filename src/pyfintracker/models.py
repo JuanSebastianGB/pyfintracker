@@ -8,7 +8,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-ROOT_TYPES: frozenset[str] = frozenset({"Assets", "Liabilities", "Equity", "Income", "Expenses"})
+ROOT_TYPES: frozenset[str] = frozenset(
+    {"Assets", "Liabilities", "Equity", "Income", "Expenses"}
+)
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,9 @@ class Account:
         if self.name == "":
             raise ValueError("Account name cannot be empty")
         if self.kind not in ROOT_TYPES:
-            raise ValueError(f"Invalid kind: {self.kind}. Must be one of {sorted(ROOT_TYPES)}")
+            raise ValueError(
+                f"Invalid kind: {self.kind}. Must be one of {sorted(ROOT_TYPES)}"
+            )
         if not (0 <= self.depth <= 2):
             raise ValueError(f"Depth must be 0-2, got {self.depth}")
 
@@ -156,10 +160,11 @@ class Rate:
             "rate": self.rate,
             "date": self.date,
             "source": self.source,
-            "fetched_at": self.fetched_at,
         }
         if self.id is not None:
             d["id"] = self.id
+        if self.fetched_at is not None:
+            d["fetched_at"] = self.fetched_at
         return d
 
     @staticmethod

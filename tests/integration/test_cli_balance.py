@@ -21,45 +21,27 @@ def _init_and_seed(tmp_path: Path, cli_runner: CliRunner) -> Path:
 
     # Create accounts with opening balances (avoiding starter-chart names)
     result = cli_runner.invoke(
-        app,
-        [
-            "account",
-            "new",
-            "Assets:Wallet",
-            "--currency",
-            "COP",
-            "--initial",
-            "500000",
+        app, [
+            "account", "new", "Assets:Wallet", "--currency", "COP",
+            "--initial", "500000",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
 
     result = cli_runner.invoke(
-        app,
-        [
-            "account",
-            "new",
-            "Assets:EmergencyFund",
-            "--currency",
-            "COP",
-            "--initial",
-            "2000000",
+        app, [
+            "account", "new", "Assets:EmergencyFund", "--currency", "COP",
+            "--initial", "2000000",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
 
     result = cli_runner.invoke(
-        app,
-        [
-            "account",
-            "new",
-            "Liabilities:TravelCard",
-            "--currency",
-            "COP",
-            "--initial",
-            "-300000",  # liability = credit balance
+        app, [
+            "account", "new", "Liabilities:TravelCard", "--currency", "COP",
+            "--initial", "-300000",  # liability = credit balance
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -78,8 +60,7 @@ def test_balance_default(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance"],
+        app, ["report", "balance"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -93,8 +74,7 @@ def test_balance_shows_accounts(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance"],
+        app, ["report", "balance"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -110,8 +90,7 @@ def test_balance_shows_net_worth(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance"],
+        app, ["report", "balance"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -125,8 +104,7 @@ def test_balance_filter(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance", "Wallet"],
+        app, ["report", "balance", "Wallet"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -143,8 +121,7 @@ def test_balance_filter_case_insensitive(tmp_path: Path, cli_runner: CliRunner) 
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance", "emergencyfund"],
+        app, ["report", "balance", "emergencyfund"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -158,8 +135,7 @@ def test_balance_filter_no_match(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance", "Nonexistent"],
+        app, ["report", "balance", "Nonexistent"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -173,8 +149,7 @@ def test_balance_includes_starter_checking(tmp_path: Path, cli_runner: CliRunner
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app,
-        ["report", "balance"],
+        app, ["report", "balance"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     # Assets:Checking has zero balance, so it should not appear

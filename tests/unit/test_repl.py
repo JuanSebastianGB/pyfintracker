@@ -31,17 +31,15 @@ class TestReplCollectsInputs:
         from pyfintracker.cli import repl_add_postings
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-01-15",  # date
-                "Grocery run",  # description
-                "COP",  # currency
-                "Expenses:Food",  # account 1
-                "50000",  # amount 1
-                "Assets:Cash",  # account 2
-                "-50000",  # amount 2
-            ]
-        )
+        replies = iter([
+            "2024-01-15",       # date
+            "Grocery run",       # description
+            "COP",               # currency
+            "Expenses:Food",     # account 1
+            "50000",             # amount 1
+            "Assets:Cash",       # account 2
+            "-50000",            # amount 2
+        ])
 
         txn, postings = repl_add_postings(console, lambda *a, **kw: next(replies))
 
@@ -57,19 +55,17 @@ class TestReplCollectsInputs:
         from pyfintracker.cli import repl_add_postings
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-06-01",
-                "Split payment",
-                "COP",
-                "Expenses:Food",
-                "30000",
-                "Expenses:Transport",
-                "20000",
-                "Assets:Cash",
-                "-50000",
-            ]
-        )
+        replies = iter([
+            "2024-06-01",
+            "Split payment",
+            "COP",
+            "Expenses:Food",
+            "30000",
+            "Expenses:Transport",
+            "20000",
+            "Assets:Cash",
+            "-50000",
+        ])
 
         txn, postings = repl_add_postings(console, lambda *a, **kw: next(replies))
 
@@ -125,14 +121,12 @@ class TestReplAbort:
         from pyfintracker.cli import repl_add_postings
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-01-15",
-                "Test",
-                "COP",
-                ":abort",
-            ]
-        )
+        replies = iter([
+            "2024-01-15",
+            "Test",
+            "COP",
+            ":abort",
+        ])
 
         with pytest.raises(SystemExit) as exc:
             repl_add_postings(console, lambda *a, **kw: next(replies))
@@ -143,15 +137,13 @@ class TestReplAbort:
         from pyfintracker.cli import repl_add_postings
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-01-15",
-                "Test",
-                "COP",
-                "Expenses:Food",
-                ":abort",
-            ]
-        )
+        replies = iter([
+            "2024-01-15",
+            "Test",
+            "COP",
+            "Expenses:Food",
+            ":abort",
+        ])
 
         with pytest.raises(SystemExit) as exc:
             repl_add_postings(console, lambda *a, **kw: next(replies))
@@ -240,17 +232,15 @@ class TestReplTTY:
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-01-15",
-                "Test",
-                "COP",
-                "Expenses:Food",
-                "50000",
-                "Assets:Cash",
-                "-50000",
-            ]
-        )
+        replies = iter([
+            "2024-01-15",
+            "Test",
+            "COP",
+            "Expenses:Food",
+            "50000",
+            "Assets:Cash",
+            "-50000",
+        ])
 
         _txn, postings = repl_add_postings(console, lambda *a, **kw: next(replies))
         assert len(postings) == 2
@@ -330,17 +320,15 @@ class TestReplResolve:
         from pyfintracker.cli import repl_add_postings
 
         console = MagicMock()
-        replies = iter(
-            [
-                "2024-01-15",
-                "Test",
-                "COP",
-                "Expenses:Food",
-                "50000",
-                "Assets:Cash",
-                "-50000",
-            ]
-        )
+        replies = iter([
+            "2024-01-15",
+            "Test",
+            "COP",
+            "Expenses:Food",
+            "50000",
+            "Assets:Cash",
+            "-50000",
+        ])
 
         account_ids = {"Expenses:Food": 1, "Assets:Cash": 2}
 
@@ -375,12 +363,12 @@ class TestReplResolve:
                 1: "2024-01-15",
                 2: "Test",
                 3: "COP",
-                4: "Expenses:Nope",  # Account → unknown, error triggers on resolve
-                5: "50000",  # Amount (still collected before resolve happens)
-                6: "Expenses:Food",  # Account → known (retry)
-                7: "50000",  # Amount
-                8: "Assets:Cash",  # Account
-                9: "-50000",  # Amount
+                4: "Expenses:Nope",   # Account → unknown, error triggers on resolve
+                5: "50000",           # Amount (still collected before resolve happens)
+                6: "Expenses:Food",   # Account → known (retry)
+                7: "50000",           # Amount
+                8: "Assets:Cash",     # Account
+                9: "-50000",          # Amount
             }
             return responses.get(call_count[0], "")
 

@@ -18,10 +18,8 @@ from pyfintracker.validation import validate_transaction
 
 @given(
     amount=st.decimals(
-        min_value=Decimal("0.01"),
-        max_value=Decimal("999999999999"),
-        allow_nan=False,
-        allow_infinity=False,
+        min_value=Decimal("0.01"), max_value=Decimal("999999999999"),
+        allow_nan=False, allow_infinity=False,
     ),
     currency=st.sampled_from(["COP", "USD", "EUR", "GBP", "JPY"]),
 )

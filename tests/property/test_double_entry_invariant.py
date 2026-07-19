@@ -20,10 +20,8 @@ from pyfintracker.validation import validate_transaction
 BALANCED = st.builds(
     lambda a: (a, -a),
     st.decimals(
-        min_value=Decimal("0.01"),
-        max_value=Decimal("999999"),
-        allow_nan=False,
-        allow_infinity=False,
+        min_value=Decimal("0.01"), max_value=Decimal("999999"),
+        allow_nan=False, allow_infinity=False,
     ),
 )
 
@@ -45,16 +43,12 @@ def test_balanced_two_postings_succeeds(pair: tuple[Decimal, Decimal]) -> None:
 
 @given(
     a=st.decimals(
-        min_value=Decimal("-999"),
-        max_value=Decimal("999"),
-        allow_nan=False,
-        allow_infinity=False,
+        min_value=Decimal("-999"), max_value=Decimal("999"),
+        allow_nan=False, allow_infinity=False,
     ),
     b=st.decimals(
-        min_value=Decimal("-999"),
-        max_value=Decimal("999"),
-        allow_nan=False,
-        allow_infinity=False,
+        min_value=Decimal("-999"), max_value=Decimal("999"),
+        allow_nan=False, allow_infinity=False,
     ),
 )
 def test_unbalanced_two_postings_raises(a: Decimal, b: Decimal) -> None:

@@ -71,7 +71,6 @@ class TestMigrationSchema:
 
     def _engine(self) -> Engine:
         from sqlalchemy import create_engine
-
         return create_engine("sqlite://", poolclass=StaticPool)
 
     def test_upgrade_creates_four_tables(self) -> None:
@@ -80,9 +79,7 @@ class TestMigrationSchema:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 4, (
-                "Expected 4 tables (accounts, transactions, postings, rates)"
-            )
+            assert _count_tables(conn) == 4, "Expected 4 tables (accounts, transactions, postings, rates)"
 
     def test_accounts_table_columns(self) -> None:
         """accounts table has the expected columns."""
@@ -91,7 +88,12 @@ class TestMigrationSchema:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
             assert _table_exists(conn, "accounts")
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(accounts)")).fetchall()]
+            cols = [
+                row[1]
+                for row in conn.execute(
+                    text("PRAGMA table_info(accounts)")
+                ).fetchall()
+            ]
             assert "id" in cols
             assert "name" in cols
             assert "parent_id" in cols
@@ -109,7 +111,10 @@ class TestMigrationSchema:
             upgrade(cfg, "head")
             assert _table_exists(conn, "transactions")
             cols = [
-                row[1] for row in conn.execute(text("PRAGMA table_info(transactions)")).fetchall()
+                row[1]
+                for row in conn.execute(
+                    text("PRAGMA table_info(transactions)")
+                ).fetchall()
             ]
             assert "id" in cols
             assert "date" in cols
@@ -123,7 +128,12 @@ class TestMigrationSchema:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
             assert _table_exists(conn, "postings")
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(postings)")).fetchall()]
+            cols = [
+                row[1]
+                for row in conn.execute(
+                    text("PRAGMA table_info(postings)")
+                ).fetchall()
+            ]
             assert "id" in cols
             assert "transaction_id" in cols
             assert "account_id" in cols
@@ -146,7 +156,12 @@ class TestMigrationSchema:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
             assert _table_exists(conn, "rates")
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(rates)")).fetchall()]
+            cols = [
+                row[1]
+                for row in conn.execute(
+                    text("PRAGMA table_info(rates)")
+                ).fetchall()
+            ]
             assert "id" in cols
             assert "base_currency" in cols
             assert "target_currency" in cols
@@ -200,7 +215,9 @@ class TestStarterChart:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            rows = conn.execute(text("SELECT DISTINCT currency FROM accounts")).fetchall()
+            rows = conn.execute(
+                text("SELECT DISTINCT currency FROM accounts")
+            ).fetchall()
             assert len(rows) == 1
             assert rows[0][0] == "COP"
 
@@ -278,7 +295,12 @@ def _downgrade_0001(conn: Connection) -> None:
 
 def _column_names(conn: Connection, table: str) -> list[str]:
     """Return list of column names for a table."""
-    return [row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()]
+    return [
+        row[1]
+        for row in conn.execute(
+            text(f"PRAGMA table_info({table})")
+        ).fetchall()
+    ]
 
 
 @pytest.mark.integration
@@ -360,9 +382,7 @@ class TestMigration0002:
             _apply_0002(conn)
 
             rows = conn.execute(
-                text(
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rates_lookup'"
-                )
+                text("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rates_lookup'")
             ).fetchall()
             assert len(rows) == 1
             assert rows[0][0] == "idx_rates_lookup"

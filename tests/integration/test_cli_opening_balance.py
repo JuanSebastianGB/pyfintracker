@@ -30,13 +30,9 @@ def _init_and_create(
     result = cli_runner.invoke(
         app,
         [
-            "account",
-            "new",
-            account_name,
-            "--currency",
-            currency,
-            "--initial",
-            initial,
+            "account", "new", account_name,
+            "--currency", currency,
+            "--initial", initial,
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -45,8 +41,7 @@ def _init_and_create(
 
 
 def test_opening_balance_creates_transaction(
-    tmp_path: Path,
-    cli_runner: CliRunner,
+    tmp_path: Path, cli_runner: CliRunner,
 ) -> None:
     """``--initial`` creates an opening balance transaction with 2 postings."""
     from pyfintracker.db import make_engine
@@ -85,8 +80,7 @@ def test_opening_balance_creates_transaction(
 
 
 def test_opening_balance_creates_equity_account(
-    tmp_path: Path,
-    cli_runner: CliRunner,
+    tmp_path: Path, cli_runner: CliRunner,
 ) -> None:
     """Equity:OpeningBalances is auto-created if it doesn't exist."""
     from pyfintracker.db import make_engine
@@ -102,8 +96,7 @@ def test_opening_balance_creates_equity_account(
 
 
 def test_opening_balance_second_initial_fails(
-    tmp_path: Path,
-    cli_runner: CliRunner,
+    tmp_path: Path, cli_runner: CliRunner,
 ) -> None:
     """Second ``--initial`` on the same account is rejected."""
     from pyfintracker.cli import app
@@ -118,4 +111,8 @@ def test_opening_balance_second_initial_fails(
     )
     assert result.exit_code != 0
     combined = (result.stdout + result.stderr).lower()
-    assert "already" in combined or "exists" in combined or "has postings" in combined
+    assert (
+        "already" in combined
+        or "exists" in combined
+        or "has postings" in combined
+    )

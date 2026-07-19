@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-MIGRATION = Path(__file__).parents[2] / "migrations" / "versions" / "0001_initial_schema.py"
+MIGRATION = (
+    Path(__file__).parents[2] / "migrations" / "versions" / "0001_initial_schema.py"
+)
 
 # (table, column) pairs that must be TEXT
 MONEY_COLUMNS: list[tuple[str, str]] = [
@@ -93,5 +95,9 @@ def test_money_columns_text() -> None:
 
     for table, column in MONEY_COLUMNS:
         cols = _parse_columns(sql_text, table)
-        assert column in cols, f"Column '{table}.{column}' not found in migration"
-        assert cols[column] == "TEXT", f"'{table}.{column}' is {cols[column]}, expected TEXT"
+        assert column in cols, (
+            f"Column '{table}.{column}' not found in migration"
+        )
+        assert cols[column] == "TEXT", (
+            f"'{table}.{column}' is {cols[column]}, expected TEXT"
+        )

@@ -33,7 +33,9 @@ def create_account(conn: Connection, account: Account) -> Account:
             {"id": account.parent_id},
         ).fetchone()
         if result is None:
-            raise AccountNotFoundError(f"Parent account id={account.parent_id} not found")
+            raise AccountNotFoundError(
+                f"Parent account id={account.parent_id} not found"
+            )
 
     params = account.to_row()
     params.pop("id", None)  # let DB auto-generate
@@ -61,7 +63,9 @@ def create_account(conn: Connection, account: Account) -> Account:
         )
     except Exception as e:
         if "UNIQUE constraint" in str(e):
-            raise ValidationError(f"Account '{account.name}' already exists") from None
+            raise ValidationError(
+                f"Account '{account.name}' already exists"
+            ) from None
         raise
 
 
@@ -91,7 +95,9 @@ def get_account_by_id(conn: Connection, id: int) -> Account | None:
 
 def list_accounts(conn: Connection) -> Sequence[Account]:
     """Return all accounts ordered alphabetically by name."""
-    rows = conn.execute(text("SELECT * FROM accounts ORDER BY name")).fetchall()
+    rows = conn.execute(
+        text("SELECT * FROM accounts ORDER BY name")
+    ).fetchall()
     return [Account.from_row(row) for row in rows]
 
 
@@ -124,9 +130,7 @@ def upsert_account(conn: Connection, name: str, currency: str) -> Account:
 
 
 def create_transaction_with_postings(
-    conn: Connection,
-    txn: Transaction,
-    postings: Sequence[Posting],
+    conn: Connection, txn: Transaction, postings: Sequence[Posting],
 ) -> int:
     """Create a transaction with its postings in a single atomic write.
 
@@ -170,14 +174,13 @@ def _row_to_rate(row: object) -> Rate:
     Handles SQLite TEXT date→datetime.date and Decimal→str conversions.
     """
 
-    r: dict[str, Any] = dict(getattr(row, "_mapping", row))  # type: ignore[call-overload]
+    r: dict[str, Any] = dict(getattr(row, '_mapping', row))  # type: ignore[call-overload]
 
     # Convert date string to date object if needed
     if isinstance(r.get("date"), str):
         r["date"] = date.fromisoformat(r["date"])
     if isinstance(r.get("fetched_at"), str):
         from datetime import datetime
-
         r["fetched_at"] = datetime.fromisoformat(r["fetched_at"])
 
     # Convert rate string to Decimal
@@ -205,9 +208,7 @@ def get_cached_rate(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> R
     Returns Rate with fetched_at populated if the column exists.
     """
     row = conn.execute(
-        text(
-            "SELECT * FROM rates WHERE base_currency = :base AND target_currency = :target AND date = :dt LIMIT 1"
-        ),
+        text("SELECT * FROM rates WHERE base_currency = :base AND target_currency = :target AND date = :dt LIMIT 1"),
         {"base": from_ccy, "target": to_ccy, "dt": str(on)},
     ).fetchone()
     return _row_to_rate(row) if row else None
@@ -268,16 +269,12 @@ def get_rate_at_date(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> 
 
 
 def list_cached_rates(
-    conn: Connection,
-    *,
-    since: date | None = None,
+    conn: Connection, *, since: date | None = None,
 ) -> Sequence[Rate]:
     """List all cached rates, optionally filtered by minimum date."""
     if since is not None:
         rows = conn.execute(
-            text(
-                "SELECT * FROM rates WHERE date >= :since ORDER BY date, base_currency, target_currency"
-            ),
+            text("SELECT * FROM rates WHERE date >= :since ORDER BY date, base_currency, target_currency"),
             {"since": str(since)},
         ).fetchall()
     else:

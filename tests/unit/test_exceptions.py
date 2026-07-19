@@ -70,9 +70,7 @@ def test_exit_code_mapping(exc_cls: type[FinanceError]) -> None:
     """Every exception has the correct exit code via .code."""
     instance = exc_cls()
     expected = EXIT_CODE_MAP[exc_cls]
-    assert instance.code == expected, (
-        f"{exc_cls.__name__}: expected {expected}, got {instance.code}"
-    )
+    assert instance.code == expected, f"{exc_cls.__name__}: expected {expected}, got {instance.code}"
 
 
 @pytest.mark.unit
@@ -97,6 +95,4 @@ FX_EXIT_CODE_MAP: dict[type[FinanceError], int] = {
 def test_fx_exception_codes(exc_cls: type[FinanceError], expected_code: int) -> None:
     """FX exceptions have correct exit codes."""
     instance = exc_cls()
-    assert instance.code == expected_code, (
-        f"{exc_cls.__name__}: expected {expected_code}, got {instance.code}"
-    )
+    assert instance.code == expected_code, f"{exc_cls.__name__}: expected {expected_code}, got {instance.code}"

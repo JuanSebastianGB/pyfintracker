@@ -86,7 +86,9 @@ def test_init_force_recreates(tmp_path: Path, cli_runner: CliRunner) -> None:
         )
 
     # Force recreate
-    result = cli_runner.invoke(app, ["init", "--force"], env={"FIN_DB_PATH": str(db_path)})
+    result = cli_runner.invoke(
+        app, ["init", "--force"], env={"FIN_DB_PATH": str(db_path)}
+    )
     assert result.exit_code == 0, result.stdout
 
     # Fresh DB should have exactly the 11 starter accounts
@@ -101,7 +103,9 @@ def test_init_custom_path(tmp_path: Path, cli_runner: CliRunner) -> None:
     from pyfintracker.cli import app
 
     custom_path = tmp_path / "custom_dir" / "data.sqlite"
-    result = cli_runner.invoke(app, ["init"], env={"FIN_DB_PATH": str(custom_path)})
+    result = cli_runner.invoke(
+        app, ["init"], env={"FIN_DB_PATH": str(custom_path)}
+    )
     assert result.exit_code == 0, result.stdout
     assert custom_path.exists()
 
@@ -111,7 +115,9 @@ def test_init_creates_parent_dir(tmp_path: Path, cli_runner: CliRunner) -> None:
     from pyfintracker.cli import app
 
     deep_path = tmp_path / "a" / "b" / "c" / "fin.db"
-    result = cli_runner.invoke(app, ["init"], env={"FIN_DB_PATH": str(deep_path)})
+    result = cli_runner.invoke(
+        app, ["init"], env={"FIN_DB_PATH": str(deep_path)}
+    )
     assert result.exit_code == 0, result.stdout
     assert deep_path.exists()
 
@@ -134,5 +140,7 @@ def test_init_without_force_is_noop(tmp_path: Path, cli_runner: CliRunner) -> No
 
     # Account should still be gone
     with engine.connect() as conn:
-        row = conn.execute(text("SELECT count(*) FROM accounts WHERE kind = 'Expenses'")).scalar()
+        row = conn.execute(
+            text("SELECT count(*) FROM accounts WHERE kind = 'Expenses'")
+        ).scalar()
     assert row == 4, "Re-init without --force should not reset accounts"
