@@ -5,7 +5,7 @@ Strict TDD: test first, then implement.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date
 from decimal import Decimal
 
 import pydantic
@@ -82,6 +82,35 @@ class TestReportsModels:
         with pytest.raises((AttributeError, TypeError, pydantic.ValidationError)):
             report.net = Decimal("100")  # type: ignore[misc]
 
+    def test_monthly_report_currency_default(self) -> None:
+        """MonthlyReport defaults to COP currency."""
+        from pyfintracker.reports import MonthlyReport
+
+        report = MonthlyReport(
+            year_month="2024-01",
+            income_lines=[],
+            expense_lines=[],
+            income_total=Decimal("0"),
+            expense_total=Decimal("0"),
+            net=Decimal("0"),
+        )
+        assert report.currency == "COP"
+
+    def test_monthly_report_currency_custom(self) -> None:
+        """MonthlyReport accepts custom currency."""
+        from pyfintracker.reports import MonthlyReport
+
+        report = MonthlyReport(
+            year_month="2024-01",
+            income_lines=[],
+            expense_lines=[],
+            income_total=Decimal("0"),
+            expense_total=Decimal("0"),
+            net=Decimal("0"),
+            currency="USD",
+        )
+        assert report.currency == "USD"
+
     def test_monthly_report_serialize(self) -> None:
         """MonthlyReport can be serialized to dict."""
         from pyfintracker.reports import MonthlyReport
@@ -141,6 +170,20 @@ class TestReportsModels:
         report = BalanceReport(lines=[], net_worth=Decimal("0"))
         with pytest.raises((AttributeError, TypeError, pydantic.ValidationError)):
             report.net_worth = Decimal("100")  # type: ignore[misc]
+
+    def test_balance_report_currency_default(self) -> None:
+        """BalanceReport defaults to COP currency."""
+        from pyfintracker.reports import BalanceReport
+
+        report = BalanceReport(lines=[], net_worth=Decimal("0"))
+        assert report.currency == "COP"
+
+    def test_balance_report_currency_custom(self) -> None:
+        """BalanceReport accepts custom currency."""
+        from pyfintracker.reports import BalanceReport
+
+        report = BalanceReport(lines=[], net_worth=Decimal("0"), currency="EUR")
+        assert report.currency == "EUR"
 
     def test_balance_report_serialize(self) -> None:
         """BalanceReport can be serialized to dict."""
@@ -263,9 +306,153 @@ def seed_simple_month(reports_engine):
     return accounts
 
 
+@pytest.fixture
+def reports_engine_with_rates(reports_engine):
+    """Extends reports_engine with a rates table."""
+    from datetime import datetime
+
+    eng = reports_engine
+    with eng.begin() as conn:
+        conn.execute(
+            text("""
+                CREATE TABLE IF NOT EXISTS rates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    base_currency TEXT NOT NULL,
+                    target_currency TEXT NOT NULL,
+                    rate TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'frankfurter',
+                    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(base_currency, target_currency, date)
+                )
+            """)
+        )
+        # Seed COP→USD rate for 2026-07-05: 1 USD = 4000 COP → 1 COP = 0.00025 USD
+        conn.execute(
+            text("""
+                INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at)
+                VALUES ('COP', 'USD', '0.00025', '2026-07-05', 'frankfurter', :now)
+            """),
+            {"now": datetime.now(UTC).isoformat()},
+        )
+        # Seed COP→USD rate for 2026-07-10: 1 USD = 4200 COP → 1 COP ≈ 0.000238 USD
+        conn.execute(
+            text("""
+                INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at)
+                VALUES ('COP', 'USD', '0.000238', '2026-07-10', 'frankfurter', :now)
+            """),
+            {"now": datetime.now(UTC).isoformat()},
+        )
+        # Seed USD→COP for 2026-07-10 (direct)
+        conn.execute(
+            text("""
+                INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at)
+                VALUES ('USD', 'COP', '4200', '2026-07-10', 'frankfurter', :now)
+            """),
+            {"now": datetime.now(UTC).isoformat()},
+        )
+        # Seed USD→COP for 2026-07-05 (direct)
+        conn.execute(
+            text("""
+                INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at)
+                VALUES ('USD', 'COP', '4000', '2026-07-05', 'frankfurter', :now)
+            """),
+            {"now": datetime.now(UTC).isoformat()},
+        )
+    yield eng
+
+
+@pytest.fixture
+def seed_mixed_month(reports_engine_with_rates):
+    """Seed data with mixed COP + USD postings in 2026-07.
+
+    Returns the engine for test use.
+    """
+    eng = reports_engine_with_rates
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"
+            ),
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:UsdAccount', 'USD', 1, 'Assets')"
+            ),
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Salary', 'COP', 1, 'Income')"
+            ),
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Freelance', 'USD', 1, 'Income')"
+            ),
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Rent', 'COP', 1, 'Expenses')"
+            ),
+        )
+        rows = conn.execute(text("SELECT id, name FROM accounts ORDER BY id")).fetchall()
+    accounts = {r.name: r.id for r in rows}
+
+    from pyfintracker.repository import create_transaction_with_postings
+
+    txn1 = Transaction(date=date(2026, 7, 5), description="Salary")
+    postings1 = [
+        Posting(account_id=accounts["Income:Salary"], amount=Decimal("-50000"), currency="COP"),
+        Posting(account_id=accounts["Assets:Checking"], amount=Decimal("50000"), currency="COP"),
+    ]
+    with get_session(eng) as conn:
+        create_transaction_with_postings(conn, txn1, postings1)
+
+    txn2 = Transaction(date=date(2026, 7, 10), description="Freelance payment")
+    postings2 = [
+        Posting(account_id=accounts["Income:Freelance"], amount=Decimal("-15"), currency="USD"),
+        Posting(account_id=accounts["Assets:UsdAccount"], amount=Decimal("15"), currency="USD"),
+    ]
+    with get_session(eng) as conn:
+        create_transaction_with_postings(conn, txn2, postings2)
+
+    txn3 = Transaction(date=date(2026, 7, 10), description="Rent")
+    postings3 = [
+        Posting(account_id=accounts["Expenses:Rent"], amount=Decimal("1200"), currency="COP"),
+        Posting(account_id=accounts["Assets:Checking"], amount=Decimal("-1200"), currency="COP"),
+    ]
+    with get_session(eng) as conn:
+        create_transaction_with_postings(conn, txn3, postings3)
+
+    return eng
+
+
 @pytest.mark.unit
 class TestComputeMonthlyReport:
     """T-6.2: compute_monthly_report logic."""
+
+    def test_monthly_report_default_display_currency(self, reports_engine, seed_simple_month) -> None:
+        """Default display_currency is COP (same as seed data) — identity."""
+        from pyfintracker.reports import compute_monthly_report
+
+        with get_session(reports_engine) as conn:
+            report = compute_monthly_report(conn, "2024-01")
+
+        assert report.currency == "COP"
+        # Verify amounts unchanged from seed
+        assert report.income_total == Decimal("3000000")
+        assert report.expense_total == Decimal("1450000")
+        assert report.net == Decimal("1550000")
+
+    def test_monthly_report_same_currency_identity(self, reports_engine, seed_simple_month) -> None:
+        """Explicit display_currency='COP' produces byte-equal results to default."""
+        from pyfintracker.reports import compute_monthly_report
+
+        with get_session(reports_engine) as conn:
+            report_default = compute_monthly_report(conn, "2024-01")
+            report_explicit = compute_monthly_report(conn, "2024-01", display_currency="COP")
+
+        assert report_default.model_dump() == report_explicit.model_dump()
 
     def test_monthly_report_happy_path(self, reports_engine, seed_simple_month) -> None:
         """Happy path: income + expenses in Jan 2024 produce correct report."""
@@ -322,6 +509,32 @@ class TestComputeMonthlyReport:
         assert report.net == Decimal("0")
         assert report.income_lines == []
         assert report.expense_lines == []
+
+    def test_compute_monthly_mixed_currency_converts_via_txn_date(
+        self, seed_mixed_month,
+    ) -> None:
+        """Mixed COP+USD postings convert each at own txn-date rate."""
+        from pyfintracker.reports import compute_monthly_report
+
+        with get_session(seed_mixed_month) as conn:
+            report = compute_monthly_report(conn, "2026-07", display_currency="USD")
+
+        assert report.currency == "USD"
+        # Income: 50000 COP @ 0.00025 = 12.50 USD, plus 15 USD = 27.50 USD
+        assert report.income_total == Decimal("27.50")
+        # Expenses: 1200 COP @ 0.000238 = 0.2856, quantized to 0.29
+        assert report.expense_total == Decimal("0.29")
+        # Net: 27.50 - 0.29 = 27.21
+        assert report.net == Decimal("27.21")
+
+    def test_compute_monthly_algebraic_identity_mixed(self, seed_mixed_month) -> None:
+        """Algebraic invariant: income_total - expense_total == net holds in display_currency."""
+        from pyfintracker.reports import compute_monthly_report
+
+        with get_session(seed_mixed_month) as conn:
+            report = compute_monthly_report(conn, "2026-07", display_currency="USD")
+
+        assert report.income_total - report.expense_total == report.net
 
     def test_invalid_year_month_format(self, reports_engine) -> None:
         """Invalid year_month format raises ValueError."""
@@ -484,6 +697,120 @@ class TestComputeBalance:
 
         names = [line.account_name for line in report.lines]
         assert "Assets:Empty" not in names
+
+    def test_compute_balance_default_display_currency(self, reports_engine, seed_simple_month) -> None:
+        """Default display_currency is COP — identity for COP-only data."""
+        from pyfintracker.reports import compute_balance
+
+        with get_session(reports_engine) as conn:
+            report = compute_balance(conn)
+
+        assert report.currency == "COP"
+        assert report.net_worth == Decimal("1550000")
+
+    def test_compute_balance_same_currency_identity(self, reports_engine, seed_simple_month) -> None:
+        """Explicit display_currency='COP' produces byte-equal defaults."""
+        from pyfintracker.reports import compute_balance
+
+        with get_session(reports_engine) as conn:
+            default = compute_balance(conn)
+            explicit = compute_balance(conn, display_currency="COP")
+
+        assert default.model_dump() == explicit.model_dump()
+
+    def test_compute_balance_three_currencies_single_decimal(self, reports_engine_with_rates) -> None:
+        """3-currency accounts — net_worth is single Decimal in display_currency."""
+        from pyfintracker.reports import compute_balance
+
+        eng = reports_engine_with_rates
+        with eng.begin() as conn:
+            from datetime import datetime
+            now_ts = datetime.now(UTC).isoformat()
+            # Seed COP→USD and EUR→USD for conversion
+            conn.execute(
+                text("INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at) VALUES ('COP', 'USD', '0.00025', '2026-07-05', 'frankfurter', :now)"),
+                {"now": now_ts},
+            )
+            conn.execute(
+                text("INSERT OR IGNORE INTO rates (base_currency, target_currency, rate, date, source, fetched_at) VALUES ('EUR', 'USD', '1.10', '2026-07-15', 'frankfurter', :now)"),
+                {"now": now_ts},
+            )
+            conn.execute(text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"))
+            conn.execute(text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:UsdAccount', 'USD', 1, 'Assets')"))
+            conn.execute(text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:EuroAccount', 'EUR', 1, 'Assets')"))
+            accts = {r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()}
+
+        from pyfintracker.repository import create_transaction_with_postings
+
+        # Three separate transactions, each in native currency. No cross-currency postings.
+        txn1 = Transaction(date=date(2026, 7, 5), description="Salary")
+        with get_session(eng) as conn:
+            create_transaction_with_postings(conn, txn1, [
+                Posting(account_id=accts["Assets:Checking"], amount=Decimal("50000"), currency="COP"),
+                Posting(account_id=accts["Assets:UsdAccount"], amount=Decimal("-50000"), currency="COP"),
+            ])
+        txn2 = Transaction(date=date(2026, 7, 10), description="USD deposit")
+        with get_session(eng) as conn:
+            create_transaction_with_postings(conn, txn2, [
+                Posting(account_id=accts["Assets:UsdAccount"], amount=Decimal("100"), currency="USD"),
+                Posting(account_id=accts["Assets:Checking"], amount=Decimal("-100"), currency="USD"),
+            ])
+        txn3 = Transaction(date=date(2026, 7, 15), description="EUR deposit")
+        with get_session(eng) as conn:
+            create_transaction_with_postings(conn, txn3, [
+                Posting(account_id=accts["Assets:EuroAccount"], amount=Decimal("200"), currency="EUR"),
+                Posting(account_id=accts["Assets:UsdAccount"], amount=Decimal("-200"), currency="EUR"),
+            ])
+
+        with get_session(eng) as conn:
+            report = compute_balance(conn, display_currency="USD")
+
+        assert report.currency == "USD"
+        # All transactions balance out — net is 0. Verify individual accounts:
+        accts = {ln.account_name: ln.balance for ln in report.lines}
+        assert accts["Assets:Checking"] == Decimal("-87.50")
+        assert accts["Assets:EuroAccount"] == Decimal("220")
+        assert isinstance(report.net_worth, Decimal)
+
+    def test_compute_balance_uses_txn_date_not_as_of(self, reports_engine_with_rates) -> None:
+        """as_of filter doesn't affect conversion date — postings convert at txn date."""
+        from pyfintracker.reports import compute_balance
+
+        # Seed a simple COP balance and a USD balance
+        eng = reports_engine_with_rates
+        with eng.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"
+                ),
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:UsdAccount', 'USD', 1, 'Assets')"
+                ),
+            )
+            accts = {
+                r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()
+            }
+
+        from pyfintracker.repository import create_transaction_with_postings
+
+        txn1 = Transaction(date=date(2026, 7, 5), description="Salary")
+        postings1 = [
+            Posting(account_id=accts["Assets:Checking"], amount=Decimal("50000"), currency="COP"),
+            Posting(account_id=accts["Assets:UsdAccount"], amount=Decimal("-50000"), currency="COP"),
+        ]
+        with get_session(eng) as conn:
+            create_transaction_with_postings(conn, txn1, postings1)
+
+        with get_session(eng) as conn:
+            report = compute_balance(conn, display_currency="USD")
+
+        assert report.currency == "USD"
+        # Checking: 50000 COP * 0.00025 = 12.50 USD
+        checking = [ln for ln in report.lines if ln.account_name == "Assets:Checking"]
+        assert len(checking) == 1
+        assert checking[0].balance == Decimal("12.50")
 
 
 @pytest.mark.unit
