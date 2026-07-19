@@ -7,11 +7,13 @@ on the accounts, transactions, and postings tables defined in migration 0001.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
-from pyfintracker.models import Account, Posting, Transaction
+from pyfintracker.models import Account, Posting, Rate, Transaction
 from pyfintracker.validation import validate_account_name, validate_transaction
 
 
@@ -163,12 +165,134 @@ def create_transaction_with_postings(
     return txn_id
 
 
+# ── Rate repository functions ──────────────────────────────────────────────────
+
+
+def _row_to_rate(row: object) -> Rate:
+    """Convert a raw DB row to Rate.
+
+    Handles SQLite TEXT date→datetime.date and Decimal→str conversions.
+    """
+    from decimal import Decimal
+
+    r = dict(getattr(row, '_mapping', row))  # type: ignore[union-attr]
+
+    # Convert date string to date object if needed
+    if isinstance(r.get("date"), str):
+        r["date"] = date.fromisoformat(r["date"])
+    if isinstance(r.get("fetched_at"), str):
+        from datetime import datetime
+        r["fetched_at"] = datetime.fromisoformat(r["fetched_at"])
+
+    # Convert rate string to Decimal
+    rate_val = r["rate"]
+    if isinstance(rate_val, str):
+        rate_val = Decimal(rate_val)
+
+    return Rate(
+        id=r.get("id"),
+        date=r["date"],
+        from_ccy=r["base_currency"],
+        to_ccy=r["target_currency"],
+        rate=rate_val,
+        fetched_at=r.get("fetched_at"),
+        source=r.get("source", "frankfurter"),
+    )
+
+
+def get_cached_rate(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> Rate | None:
+    """Look up a cached rate by (date, base_currency, target_currency).
+
+    Returns None if not found.  Does NOT invert — caller handles inversion.
+    Returns Rate with fetched_at populated if the column exists.
+    """
+    row = conn.execute(
+        text("SELECT * FROM rates WHERE base_currency = :base AND target_currency = :target AND date = :dt LIMIT 1"),
+        {"base": from_ccy, "target": to_ccy, "dt": str(on)},
+    ).fetchone()
+    return _row_to_rate(row) if row else None
+
+
+def upsert_rate(conn: Connection, rate: Rate) -> Rate:
+    """Insert or update a rate row. Idempotent on (date, from_ccy, to_ccy).
+
+    Returns the Rate as stored (with id populated).
+    When fetched_at is available (after 0002 migration), it is stored and returned.
+    """
+    params = rate.to_row()
+    params.pop("id", None)  # Let DB auto-generate / ignore on conflict
+    # Convert typed objects to strings for SQLite TEXT columns
+    params["date"] = str(params["date"]) if hasattr(params.get("date"), "isoformat") else str(params["date"])
+    params["rate"] = str(params.get("rate", ""))
+
+    if params.get("fetched_at") is not None:
+        params["fetched_at"] = str(params["fetched_at"])
+        row = conn.execute(
+            text("""
+                INSERT INTO rates (base_currency, target_currency, rate, date, source, fetched_at)
+                VALUES (:base_currency, :target_currency, :rate, :date, :source, :fetched_at)
+                ON CONFLICT(base_currency, target_currency, date)
+                DO UPDATE SET
+                    rate = excluded.rate,
+                    fetched_at = excluded.fetched_at
+                RETURNING id
+            """),
+            params,
+        ).fetchone()
+    else:
+        row = conn.execute(
+            text("""
+                INSERT INTO rates (base_currency, target_currency, rate, date, source)
+                VALUES (:base_currency, :target_currency, :rate, :date, :source)
+                ON CONFLICT(base_currency, target_currency, date)
+                DO UPDATE SET rate = excluded.rate
+                RETURNING id
+            """),
+            params,
+        ).fetchone()
+
+    assert row is not None
+    # Fetch the full row to return complete Rate
+    inserted_id = row[0]
+    full = conn.execute(
+        text("SELECT * FROM rates WHERE id = :id"),
+        {"id": inserted_id},
+    ).fetchone()
+    assert full is not None
+    return _row_to_rate(full)
+
+
+def get_rate_at_date(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> Rate | None:
+    """Alias for get_cached_rate — find rate at a specific date."""
+    return get_cached_rate(conn, from_ccy, to_ccy, on)
+
+
+def list_cached_rates(
+    conn: Connection, *, since: date | None = None,
+) -> Sequence[Rate]:
+    """List all cached rates, optionally filtered by minimum date."""
+    if since is not None:
+        rows = conn.execute(
+            text("SELECT * FROM rates WHERE date >= :since ORDER BY date, base_currency, target_currency"),
+            {"since": str(since)},
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            text("SELECT * FROM rates ORDER BY date, base_currency, target_currency"),
+        ).fetchall()
+    return [_row_to_rate(row) for row in rows]
+
+
 __all__ = [
     "account_has_postings",
     "create_account",
     "create_transaction_with_postings",
     "get_account_by_id",
     "get_account_by_name",
+    "get_cached_rate",
+    "get_rate_at_date",
     "list_accounts",
+    "list_cached_rates",
     "upsert_account",
+    "upsert_rate",
 ]
