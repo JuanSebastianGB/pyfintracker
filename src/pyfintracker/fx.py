@@ -213,7 +213,8 @@ def get_rate(
     today = date.today()
 
     # ── helpers ───────────────────────────────────────────────────────────_
-    def _rate_age(cached_rate: Rate) -> float | None:
+    # ponytail: return as int seconds — float stays out of the money pipeline
+    def _rate_age(cached_rate: Rate) -> int | None:
         """Return age in seconds, handling naive/aware datetime mismatch."""
         ft = cached_rate.fetched_at
         if ft is None:
@@ -221,7 +222,7 @@ def get_rate(
         # SQLite stores naive UTC — treat as UTC if no tz
         if ft.tzinfo is None:
             ft = ft.replace(tzinfo=UTC)
-        return (now - ft).total_seconds()
+        return int((now - ft).total_seconds())
 
     # --- 1. Same-currency identity ---
     if from_ccy == to_ccy:
