@@ -47,7 +47,7 @@ class TestSameCurrencyAndCacheHit:
         """Cache hit returns stored Rate, 0 transport calls."""
         upsert_rate(
             session,
-            Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")),
+            Rate(date=date.today(), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")),
         )
         transport_calls: list[str] = []
 
@@ -70,14 +70,14 @@ class TestInverseLookup:
         """Inverse rate is 1/direct quantized to from_ccy precision."""
         upsert_rate(
             session,
-            Rate(date=date(2026, 7, 18), from_ccy="COP", to_ccy="USD", rate=Decimal("0.000307")),
+            Rate(date=date.today(), from_ccy="COP", to_ccy="USD", rate=Decimal("0.000307")),
         )
 
         def handler(req: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=_rate_json("2026-07-18", "USD", "COP", 3257.0))
+            return httpx.Response(200, json=_rate_json(str(date.today()), "USD", "COP", 3257.0))
 
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
-        rate = get_rate("USD", "COP", on=date(2026, 7, 18), _client=client, _conn=session)
+        rate = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
         # 1 / 0.000307 ≈ 3257.328... → quantized to from_ccy (USD) precision (2) = 3257.33
         assert rate.rate == Decimal("3257.33")
         assert rate.from_ccy == "USD"
@@ -96,7 +96,7 @@ class TestCacheMissFetch:
             transport_calls.append(str(req.url))
             return httpx.Response(
                 200,
-                json=_rate_json("2026-07-18", "USD", "COP", 3255.56),
+                json=_rate_json(str(date.today()), "USD", "COP", 3255.56),
             )
 
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
@@ -106,7 +106,7 @@ class TestCacheMissFetch:
         assert len(transport_calls) == 1
 
         # Verify cached in DB
-        cached = get_cached_rate(session, "USD", "COP", date(2026, 7, 18))
+        cached = get_cached_rate(session, "USD", "COP", date.today())
         assert cached is not None
         assert cached.rate == Decimal("3255.56")
 
@@ -299,7 +299,7 @@ class TestEndToEnd:
             transport_calls.append(str(req.url))
             return httpx.Response(
                 200,
-                json=_rate_json("2026-07-18", "USD", "COP", 3255.56),
+                json=_rate_json(str(date.today()), "USD", "COP", 3255.56),
             )
 
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
