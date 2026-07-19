@@ -366,3 +366,141 @@ class TestMigration0002:
             ).fetchall()
             assert len(rows) == 1
             assert rows[0][0] == "idx_rates_lookup"
+
+
+# ── T-E.9: 0002 idempotent roundtrip with Wave 1 data ─────────────────────────
+
+
+@pytest.mark.integration
+class TestMigration0002IdempotentWithData:
+    """0001 → 0002 → 0001 → 0002 roundtrip preserves Wave 1 single-currency data.
+
+    Seeds: 11 starter accounts (COP) + 5 postings on a single transaction.
+    Runs: upgrade 0002 (with backfill) → downgrade 0001 → upgrade 0002 (with
+    backfill again). Verifies after each leg that the schema AND the data
+    are still consistent.
+    """
+
+    def _seed_wave1_data(self, conn: Connection) -> None:
+        """Insert 5 postings on a single transaction.
+
+        All amounts in COP (single-currency Wave 1 invariant). Uses the 0001
+        schema (no transactions.currency column) — the column is added by 0002
+        which then backfills it.
+        """
+        # Get the account IDs we need (starter chart is seeded by 0001)
+        rows = conn.execute(
+            text("SELECT id, name FROM accounts WHERE name IN (:n1, :n2, :n3, :n4, :n5)"),
+            {
+                "n1": "Assets:Cash",
+                "n2": "Income:Salary",
+                "n3": "Expenses:Food:Groceries",
+                "n4": "Expenses:Food:Restaurants",
+                "n5": "Expenses:Transport",
+            },
+        ).fetchall()
+        ids = {name: id_ for id_, name in rows}
+        assert len(ids) == 5, f"Expected 5 starter accounts, got {ids}"
+
+        # Insert a transaction (0001 schema: no currency column)
+        result = conn.execute(
+            text(
+                "INSERT INTO transactions (date, description) "
+                "VALUES (:date, :desc) RETURNING id"
+            ),
+            {"date": "2026-01-15", "desc": "Salary January"},
+        )
+        txn_id = result.scalar()
+        assert txn_id is not None
+
+        # 5 postings summing to zero (Wave 1 invariant)
+        postings = [
+            (ids["Income:Salary"], "-4000000", "COP"),
+            (ids["Assets:Cash"], "3500000", "COP"),
+            (ids["Expenses:Food:Groceries"], "300000", "COP"),
+            (ids["Expenses:Food:Restaurants"], "100000", "COP"),
+            (ids["Expenses:Transport"], "100000", "COP"),
+        ]
+        # Sum: -4M + 3.5M + 300k + 100k + 100k = 0 ✓
+        for account_id, amount, ccy in postings:
+            conn.execute(
+                text(
+                    "INSERT INTO postings (transaction_id, account_id, amount, currency) "
+                    "VALUES (:tid, :aid, :amt, :ccy)"
+                ),
+                {"tid": txn_id, "aid": account_id, "amt": amount, "ccy": ccy},
+            )
+
+    def _count_postings_for_txn(self, conn: Connection, txn_date: str) -> int:
+        row = conn.execute(
+            text(
+                "SELECT count(*) FROM postings p "
+                "JOIN transactions t ON p.transaction_id = t.id "
+                "WHERE t.date = :d"
+            ),
+            {"d": txn_date},
+        ).scalar()
+        return row or 0
+
+    def _transactions_currency_value(self, conn: Connection, txn_date: str) -> str | None:
+        row = conn.execute(
+            text("SELECT currency FROM transactions WHERE date = :d"),
+            {"d": txn_date},
+        ).fetchone()
+        return row[0] if row else None
+
+    def test_0002_idempotent_roundtrip_with_wave1_data(self) -> None:
+        """Wave 1 data: 11 COP accounts + 5 postings survives full round-trip.
+
+        upgrade 0002 → downgrade 0001 → upgrade 0002:
+        - Schema resets and re-applies cleanly
+        - 11 accounts still present (starter chart persists)
+        - 5 postings still present (data preserved)
+        - accounts.currency CHECK allows the 12-currency widen
+        """
+        engine = create_engine("sqlite://", poolclass=StaticPool)
+        with engine.connect() as conn:
+            # ── Leg 1: apply 0001 + seed Wave 1 data + upgrade to 0002 ──
+            upgrade(_make_config(conn), "0001")
+            self._seed_wave1_data(conn)
+            conn.commit()
+
+            _apply_0002(conn)
+            # Verify after first upgrade to 0002
+            assert _column_names(conn, "transactions") and "currency" in _column_names(
+                conn, "transactions"
+            )
+            assert self._count_postings_for_txn(conn, "2026-01-15") == 5
+
+            # ── Leg 2: downgrade to 0001 (drops transactions.currency) ──
+            _downgrade_0001(conn)
+            # transactions.currency should be gone, data still here
+            assert "currency" not in _column_names(conn, "transactions")
+            assert self._count_postings_for_txn(conn, "2026-01-15") == 5
+
+            # ── Leg 3: re-upgrade to 0002 (re-adds transactions.currency,
+            # backfills from dominant posting currency = COP) ──
+            _apply_0002(conn)
+            assert "currency" in _column_names(conn, "transactions")
+            assert self._count_postings_for_txn(conn, "2026-01-15") == 5
+            # Backfilled currency matches Wave 1 invariant: COP
+            assert self._transactions_currency_value(conn, "2026-01-15") == "COP"
+
+            # ── Side-check: accounts.currency CHECK widened to 12 currencies ──
+            # Insert CAD account (would fail under 0001's narrow CHECK)
+            conn.execute(
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) "
+                    "VALUES (:name, :currency, :depth, :kind)"
+                ),
+                {
+                    "name": "Expenses:Intl:Shopping",
+                    "currency": "CAD",
+                    "depth": 2,
+                    "kind": "Expenses",
+                },
+            )
+            conn.commit()
+            # Total accounts: 11 starter + 1 CAD = 12
+            total = conn.execute(text("SELECT count(*) FROM accounts")).scalar()
+            assert total == 12
