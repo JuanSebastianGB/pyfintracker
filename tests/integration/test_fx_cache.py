@@ -53,10 +53,10 @@ class TestSameCurrencyAndCacheHit:
 
         def handler(req: httpx.Request) -> httpx.Response:
             transport_calls.append(str(req.url))
-            return httpx.Response(200, json=_rate_json("2026-07-18", "USD", "COP", 3300.0))
+            return httpx.Response(200, json=_rate_json(str(date.today()), "USD", "COP", 3300.0))
 
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
-        rate = get_rate("USD", "COP", on=date(2026, 7, 18), _client=client, _conn=session)
+        rate = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
 
         assert rate.rate == Decimal("3255.56")
         assert len(transport_calls) == 0
@@ -305,7 +305,7 @@ class TestEndToEnd:
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
 
         # First call — cache miss
-        rate1 = get_rate("USD", "COP", on=date(2026, 7, 18), _client=client, _conn=session)
+        rate1 = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
         assert rate1.rate == Decimal("3255.56")
         assert len(transport_calls) == 1
 
@@ -316,7 +316,7 @@ class TestEndToEnd:
         assert rows == 1
 
         # Second call — cache hit
-        rate2 = get_rate("USD", "COP", on=date(2026, 7, 18), _client=client, _conn=session)
+        rate2 = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
         assert rate2.rate == Decimal("3255.56")
         assert len(transport_calls) == 1  # no new calls
 
