@@ -46,17 +46,21 @@ def connection(engine: Engine) -> Generator[Connection, None, None]:
     conn.close()
 
 
-@pytest.fixture(scope="function")
-def session(connection: Connection) -> Generator[Connection, None, None]:
-    """PEP 249 session wrapping the connection with transaction rollback.
+@pytest.fixture(autouse=True)
+def _reset_toml_cache() -> Generator[None, None, None]:
+    """Reset the cached TOML config data after each test.
 
-    The transaction is rolled back after the test completes, providing a
-    safety net.  Since the database is in-memory, the entire DB is
-    discarded after each test regardless.
+    Tests in ``test_config.py`` mutate the user's ``~/.config/fin/config.toml``
+    file.  The module-level cache in ``pyfintracker.config`` would otherwise
+    leak state between tests, causing ``source_of`` to report the wrong layer.
     """
-    trans = connection.begin()
-    yield connection
-    trans.rollback()
+    yield
+    try:
+        from pyfintracker.config import _invalidate_toml_cache
+
+        _invalidate_toml_cache()
+    except ImportError:
+        pass
 
 
 @pytest.fixture(scope="function")

@@ -107,6 +107,27 @@ class Settings(BaseSettings):
 
 _TOML_PATH = Path("~/.config/fin/config.toml").expanduser()
 
+# Cache for parsed TOML data — the config file does not change during a CLI
+# invocation, so we read it once and reuse.  ``None`` means the cache is cold
+# or the file is missing.
+_TOML_CACHE: dict[str, object] | None = None
+
+
+def _load_toml_data() -> dict[str, object]:
+    """Read and cache the parsed TOML config (read-once per process)."""
+    global _TOML_CACHE
+    if _TOML_CACHE is None and _TOML_PATH.exists():
+        with open(_TOML_PATH, "rb") as f:
+            _TOML_CACHE = tomllib.load(f)
+    return _TOML_CACHE or {}
+
+
+def _invalidate_toml_cache() -> None:
+    """Clear the cached TOML data (used by tests after mutating the config file)."""
+    global _TOML_CACHE
+    _TOML_CACHE = None
+
+
 # Map from deprecated field names to current field names.
 _DEPRECATED_FIELDS: dict[str, str] = {
     "default_currency": "display_currency",
@@ -146,14 +167,11 @@ def source_of(field: str, cli_overrides: dict[str, object] | None = None) -> str
     if env_val is not None:
         return "env"
 
-    if _TOML_PATH.exists():
-        with open(_TOML_PATH, "rb") as f:
-            data = tomllib.load(f)
-        if current in data:
-            return "toml"
-        # Also check deprecated names in TOML
-        if field != current and field in data:
-            return "toml"
+    data = _load_toml_data()
+    if current in data:
+        return "toml"
+    if field != current and field in data:
+        return "toml"
 
     return "default"
 

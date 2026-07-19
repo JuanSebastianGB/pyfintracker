@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Callable
-from decimal import Decimal
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from importlib.metadata import version as pkg_version
-from typing import TYPE_CHECKING
 
 import typer
-
-if TYPE_CHECKING:
-    from pyfintracker.models import Posting, Transaction
-
+from alembic.command import downgrade, upgrade
+from alembic.config import Config
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
 from pyfintracker.config import load_settings, source_of
 from pyfintracker.db import make_engine
@@ -23,9 +23,34 @@ from pyfintracker.exceptions import (
     AccountNotFoundError,
     ConfigError,
     FinanceError,
+    InvalidAmount,
+    InvalidDate,
     NotInitializedError,
     ReplRequiresTTYError,
     ValidationError,
+)
+from pyfintracker.fx import convert as fx_convert
+from pyfintracker.fx import get_rate as fx_get_rate
+from pyfintracker.models import Account, Posting, Transaction
+from pyfintracker.reports import (
+    compute_balance,
+    compute_monthly_report,
+    render_balance,
+    render_monthly_report,
+)
+from pyfintracker.repository import (
+    create_account,
+    create_opening_balance_transaction,
+    create_transaction_with_postings,
+    get_account_by_name,
+    list_accounts,
+)
+from pyfintracker.validation import (
+    validate_account_name,
+    validate_amount,
+    validate_currency,
+    validate_date,
+    validate_description,
 )
 
 __version__ = pkg_version("pyfintracker")
@@ -36,6 +61,18 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 
+console = Console()
+
+# ── Account sub-app ──────────────────────────────────────────────────────────
+
+account_app = typer.Typer(help="Manage accounts.")
+app.add_typer(account_app, name="account")
+
+# ── Report sub-app ───────────────────────────────────────────────────────────
+
+report_app = typer.Typer(help="Financial reports.")
+app.add_typer(report_app, name="report")
+
 
 @app.callback(invoke_without_command=True)
 def _main(ctx: typer.Context) -> None:
@@ -43,19 +80,6 @@ def _main(ctx: typer.Context) -> None:
     # If no subcommand is given, show help
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
-
-
-# ── Account sub-app ──────────────────────────────────────────────────────────
-
-
-account_app = typer.Typer(help="Manage accounts.")
-app.add_typer(account_app, name="account")
-
-# ── Report sub-app ───────────────────────────────────────────────────────────
-
-
-report_app = typer.Typer(help="Financial reports.")
-app.add_typer(report_app, name="report")
 
 
 def _render_error(error: FinanceError, console: Console) -> None:
@@ -68,8 +92,6 @@ def _render_error(error: FinanceError, console: Console) -> None:
     - ReplRequiresTTYError → plain stderr text "REPL Error"
     - Default (FinanceError base) → plain text "Error"
     """
-    from rich.panel import Panel
-
     if isinstance(error, ReplRequiresTTYError):
         console.print(f"[bold]REPL Error:[/bold] {error.message}")
     elif isinstance(error, (ConfigError, NotInitializedError)):
@@ -93,7 +115,7 @@ def convert(
     amount: str = typer.Argument(..., help="Amount to convert"),
     from_ccy: str = typer.Argument(..., help="Source currency ISO code"),
     to_ccy: str = typer.Argument(..., help="Target currency ISO code"),
-    date: str = typer.Option("", "--date", help="Rate date (YYYY-MM-DD, default: latest)"),
+    on_date: str = typer.Option("", "--date", help="Rate date (YYYY-MM-DD, default: latest)"),
 ) -> None:
     """Convert an amount between currencies using live FX rates.
 
@@ -101,13 +123,6 @@ def convert(
     fin convert 100 USD COP\n
     fin convert 50000 COP USD --date 2026-07-18
     """
-    from datetime import date as dt_date
-
-    from pyfintracker.fx import convert as fx_convert
-    from pyfintracker.validation import validate_amount, validate_currency
-
-    console = Console()
-
     try:
         validated_from = validate_currency(from_ccy)
         validated_to = validate_currency(to_ccy)
@@ -116,12 +131,10 @@ def convert(
         _render_error(e, console)
         raise typer.Exit(code=1) from None
 
-    on: dt_date | None = None
-    if date:
-        from pyfintracker.validation import validate_date
-
+    on: date | None = None
+    if on_date:
         try:
-            on = validate_date(date)
+            on = validate_date(on_date)
         except FinanceError as e:
             _render_error(e, console)
             raise typer.Exit(code=1) from None
@@ -132,11 +145,8 @@ def convert(
         _render_error(e, console)
         raise typer.Exit(code=e.code) from None
 
-    # Fetch the rate for display
-    from pyfintracker.fx import get_rate
-
     try:
-        rate_info = get_rate(validated_from, validated_to, on=on)
+        rate_info = fx_get_rate(validated_from, validated_to, on=on)
         rate_str = f"{rate_info.rate} ({rate_info.date}, {rate_info.source})"
     except FinanceError:
         rate_str = "unknown"
@@ -164,16 +174,13 @@ def init(
 
     if force and db_path.exists():
         db_path.unlink()
-        # Clean up WAL and SHM files from a previous WAL-mode DB
         for ext in ("-wal", "-shm"):
             p = db_path.with_name(db_path.name + ext)
             if p.exists():
                 p.unlink()
 
-    # Ensure parent directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Run migrations via Alembic
     engine = make_engine(f"sqlite:///{db_path}")
     _run_alembic(engine, "up", "head")
 
@@ -221,7 +228,6 @@ def config_show() -> None:
         source = source_of(field)
         data[field] = (str(value), source)
 
-    # Determine column widths
     max_field = max(len(f) for f in data)
     max_val = max(len(v[0]) for v in data.values())
     max_src = max(len(v[1]) for v in data.values())
@@ -240,34 +246,15 @@ def account_new(
     initial: str | None = typer.Option(None, "--initial", help="Opening balance"),
 ) -> None:
     """Create a new account."""
-    from datetime import date
-
-    from pyfintracker.exceptions import FinanceError
-    from pyfintracker.models import Account, Posting, Transaction
-    from pyfintracker.repository import (
-        create_account,
-        create_transaction_with_postings,
-        get_account_by_name,
-        upsert_account,
-    )
-    from pyfintracker.validation import (
-        validate_account_name,
-        validate_amount,
-        validate_currency,
-        validate_description,
-    )
-
     try:
         canonical = validate_account_name(name)
         validated_currency = validate_currency(currency)
         if description:
             validate_description(description)
     except FinanceError as e:
-        console = Console()
         _render_error(e, console)
         raise typer.Exit(code=1) from None
 
-    # Derive kind and depth from the colon-separated name
     parts = canonical.split(":")
     kind = parts[0]
     depth = len(parts) - 1
@@ -282,44 +269,16 @@ def account_new(
 
             if initial is not None:
                 validated_amount = validate_amount(initial, validated_currency)
-
-                assert account.id is not None  # freshly created
-
-                equity = get_account_by_name(conn, "Equity:OpeningBalances")
-                if equity is None:
-                    equity = upsert_account(
-                        conn,
-                        name="Equity:OpeningBalances",
-                        currency=validated_currency,
-                    )
-                assert equity.id is not None
-
-                txn = Transaction(
-                    date=date.today(),
-                    description=f"Opening balance for {canonical}",
-                    currency=validated_currency,
-                )
-                postings = [
-                    Posting(
-                        account_id=account.id, amount=validated_amount, currency=validated_currency
-                    ),
-                    Posting(
-                        account_id=equity.id, amount=-validated_amount, currency=validated_currency
-                    ),
-                ]
-                create_transaction_with_postings(conn, txn, postings)
-
-                console = Console()
+                create_opening_balance_transaction(conn, account, validated_amount)
                 console.print(
-                    f"[green]✓[/green] '{canonical}' created with opening balance {validated_amount} {validated_currency}"
+                    f"[green]✓[/green] '{canonical}' created with opening balance "
+                    f"{validated_amount} {validated_currency}"
                 )
                 return
 
-            console = Console()
             console.print(f"[green]✓[/green] Account '{canonical}' created ({validated_currency})")
 
     except (FinanceError, ValueError) as e:
-        console = Console()
         if isinstance(e, FinanceError):
             _render_error(e, console)
         else:
@@ -330,13 +289,10 @@ def account_new(
 @account_app.command("list")
 def account_list() -> None:
     """List all accounts."""
-    from pyfintracker.repository import list_accounts
-
     engine = _get_engine()
     with engine.begin() as conn:
         accounts = list_accounts(conn)
 
-    console = Console()
     table = Table(title="Accounts")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
@@ -356,82 +312,17 @@ def account_list() -> None:
     console.print(table)
 
 
-@app.command()
-def add(
-    from_account: str | None = typer.Option(None, "--from", help="Source account"),
-    to_account: str | None = typer.Option(None, "--to", help="Destination account"),
-    amount: str | None = typer.Option(None, "--amount", help="Amount to transfer"),
-    currency: str = typer.Option("COP", "--currency", help="Currency"),
-    description: str | None = typer.Option(None, "--description", help="Transaction description"),
+# ── `add` command (flag-mode + REPL-mode helpers) ─────────────────────────────
+
+
+def _add_flag_mode(
+    from_account: str,
+    to_account: str,
+    amount: str,
+    currency: str,
+    description: str,
 ) -> None:
-    """Add a transaction. Use flags for direct entry, or omit flags for REPL."""
-    from datetime import date
-
-    from pyfintracker.exceptions import AccountNotFoundError, FinanceError
-    from pyfintracker.models import Posting, Transaction
-    from pyfintracker.repository import (
-        create_transaction_with_postings,
-        get_account_by_name,
-        list_accounts,
-    )
-    from pyfintracker.validation import (
-        validate_account_name,
-        validate_amount,
-        validate_currency,
-        validate_description,
-    )
-
-    # Detect REPL vs flag mode
-    flag_args = [from_account, to_account, amount, description]
-    flag_mode = any(a is not None for a in flag_args)
-
-    if not flag_mode:
-        # ── REPL mode ───────────────────────────────────────
-        # TTY check is inside repl_add_postings — no need to duplicate here.
-        console = Console()
-        engine = _get_engine()
-
-        try:
-            with engine.begin() as conn:
-                accounts = list_accounts(conn)
-                account_names = [a.name for a in accounts]
-
-                def _resolve(name: str) -> int:
-                    acct = get_account_by_name(conn, name)
-                    if acct is None:
-                        raise AccountNotFoundError(f"Account '{name}' not found")
-                    assert acct.id is not None
-                    return acct.id
-
-                txn, postings = repl_add_postings(
-                    console,
-                    _stdin_prompt,
-                    _resolve,
-                    account_names,
-                )
-                txn_id = create_transaction_with_postings(conn, txn, postings)
-
-            console.print(f"[green]✓[/green] Transaction #{txn_id}: {txn.description}")
-        except FinanceError as e:
-            console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=getattr(e, "code", 1)) from None
-
-        return
-
-    # ── Flag mode — partial flags check ─────────────────────
-    if not all(a is not None for a in flag_args):
-        Console().print(
-            "[red]Error:[/red] Use all flags (--from, --to, --amount, --description) "
-            "or none (for REPL mode)."
-        )
-        raise typer.Exit(code=2)
-
-    # Narrow types after the all-not-None guard (mypy can't do this)
-    assert from_account is not None
-    assert to_account is not None
-    assert amount is not None
-    assert description is not None
-
+    """Add a transaction from explicit CLI flags (non-interactive)."""
     try:
         validated_amount = validate_amount(amount, currency)
         from_name = validate_account_name(from_account)
@@ -439,7 +330,6 @@ def add(
         validated_currency = validate_currency(currency)
         validate_description(description)
     except FinanceError as e:
-        console = Console()
         _render_error(e, console)
         raise typer.Exit(code=1) from None
 
@@ -448,13 +338,11 @@ def add(
         with engine.begin() as conn:
             src = get_account_by_name(conn, from_name)
             if src is None:
-                console = Console()
                 _render_error(AccountNotFoundError(f"Account '{from_name}' not found"), console)
                 raise typer.Exit(code=1)
             assert src.id is not None
             dst = get_account_by_name(conn, to_name)
             if dst is None:
-                console = Console()
                 _render_error(AccountNotFoundError(f"Account '{to_name}' not found"), console)
                 raise typer.Exit(code=1)
             assert dst.id is not None
@@ -471,18 +359,78 @@ def add(
 
             txn_id = create_transaction_with_postings(conn, txn, postings)
 
-        console = Console()
         console.print(
-            f"[green]✓[/green] Transaction #{txn_id}: {description} ({validated_amount} {validated_currency})"
+            f"[green]✓[/green] Transaction #{txn_id}: {description} "
+            f"({validated_amount} {validated_currency})"
         )
 
     except (FinanceError, ValueError) as e:
-        console = Console()
         if isinstance(e, FinanceError):
             _render_error(e, console)
         else:
             console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=getattr(e, "code", 1)) from None
+
+
+def _add_repl_mode() -> None:
+    """Add a transaction through the interactive REPL."""
+    engine = _get_engine()
+
+    try:
+        with engine.begin() as conn:
+            accounts = list_accounts(conn)
+            account_names = [a.name for a in accounts]
+
+            def _resolve(name: str) -> int | None:
+                acct = get_account_by_name(conn, name)
+                if acct is None or acct.id is None:
+                    return None
+                return acct.id
+
+            txn, postings = repl_add_postings(
+                console,
+                _stdin_prompt,
+                _resolve,
+                account_names,
+            )
+            txn_id = create_transaction_with_postings(conn, txn, postings)
+
+        console.print(f"[green]✓[/green] Transaction #{txn_id}: {txn.description}")
+    except FinanceError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=getattr(e, "code", 1)) from None
+
+
+@app.command()
+def add(
+    from_account: str | None = typer.Option(None, "--from", help="Source account"),
+    to_account: str | None = typer.Option(None, "--to", help="Destination account"),
+    amount: str | None = typer.Option(None, "--amount", help="Amount to transfer"),
+    currency: str = typer.Option("COP", "--currency", help="Currency"),
+    description: str | None = typer.Option(None, "--description", help="Transaction description"),
+) -> None:
+    """Add a transaction. Use flags for direct entry, or omit flags for REPL."""
+    flag_args = [from_account, to_account, amount, description]
+    flag_mode = any(a is not None for a in flag_args)
+
+    if not flag_mode:
+        _add_repl_mode()
+        return
+
+    if not all(a is not None for a in flag_args):
+        console.print(
+            "[red]Error:[/red] Use all flags (--from, --to, --amount, --description) "
+            "or none (for REPL mode)."
+        )
+        raise typer.Exit(code=2)
+
+    # Narrow types after the all-not-None guard (mypy can't do this)
+    assert from_account is not None
+    assert to_account is not None
+    assert amount is not None
+    assert description is not None
+
+    _add_flag_mode(from_account, to_account, amount, currency, description)
 
 
 # ── Report sub-app commands ──────────────────────────────────────────────────
@@ -493,13 +441,9 @@ def _resolve_display_currency(currency: str | None) -> str:
 
     Validates the currency before returning.
     """
-    from pyfintracker.config import load_settings
-    from pyfintracker.validation import validate_currency
-
     if currency:
         return validate_currency(currency)
 
-    # Fall back to config display_currency
     settings = load_settings()
     dsp = settings.display_currency or "COP"
     return validate_currency(dsp)
@@ -511,17 +455,10 @@ def report_month(
     currency: str | None = typer.Option(None, "--currency", help="Display currency ISO code"),
 ) -> None:
     """Show income/expense report for a month."""
-    import re
-    from datetime import date
-
-    from pyfintracker.exceptions import FinanceError
-    from pyfintracker.reports import compute_monthly_report, render_monthly_report
-
-    # Validate currency FIRST (D7) — before any DB query
     try:
         validated_currency = _resolve_display_currency(currency)
     except FinanceError as e:
-        Console().print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
     year_month = month
@@ -529,16 +466,12 @@ def report_month(
         today = date.today()
         year_month = f"{today.year}-{today.month:02d}"
     elif not re.match(r"^\d{4}-\d{2}$", year_month):
-        from pyfintracker.exceptions import InvalidDate
-
-        console = Console()
         _render_error(
             InvalidDate(f"Invalid month format '{year_month}'. Expected YYYY-MM."), console
         )
         raise typer.Exit(code=1)
 
     engine = _get_engine()
-    console = Console()
     with engine.begin() as conn:
         report = compute_monthly_report(conn, year_month, display_currency=validated_currency)
     render_monthly_report(report, console)
@@ -550,19 +483,13 @@ def balance(
     currency: str | None = typer.Option(None, "--currency", help="Display currency ISO code"),
 ) -> None:
     """Show account balances and net worth."""
-    from pyfintracker.exceptions import FinanceError
-
-    # Validate currency FIRST (D7) — before any DB query
     try:
         validated_currency = _resolve_display_currency(currency)
     except FinanceError as e:
-        Console().print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1) from None
 
-    from pyfintracker.reports import compute_balance, render_balance
-
     engine = _get_engine()
-    console = Console()
     with engine.begin() as conn:
         report = compute_balance(conn, display_currency=validated_currency)
 
@@ -579,11 +506,6 @@ def balance(
 
 def _parse_repl_amount(raw: str) -> Decimal:
     """Parse REPL amount input: strip commas, reject zero and non-numeric."""
-    import re
-    from decimal import InvalidOperation
-
-    from pyfintracker.exceptions import InvalidAmount
-
     cleaned = re.sub(r"[,\s]", "", raw.strip())
     if not cleaned:
         raise InvalidAmount("Amount is empty")
@@ -610,7 +532,7 @@ def _suggest_accounts(name: str, available: list[str]) -> list[str]:
 def repl_add_postings(
     console: Console,
     prompt_fn: Callable[..., str],
-    resolve_account: Callable[[str], int] | None = None,
+    resolve_account: Callable[[str], int | None] | None = None,
     available_accounts: list[str] | None = None,
 ) -> tuple[Transaction, list[Posting]]:
     """Interactive REPL for transaction entry.
@@ -621,36 +543,27 @@ def repl_add_postings(
             user input.  In production wraps questionary / input(); in tests
             returns scripted replies.
         resolve_account: Optional callback to resolve account names to IDs.
-            When None, account_id is set to 0 (for tests).
+            Returns None when the name is unknown; the REPL owns the
+            suggestions / re-prompt UX.  When None, account_id is 0
+            (for tests).
         available_accounts: Optional list of valid account names for suggestions.
 
     Returns:
         Tuple of (Transaction, List[Posting]) ready to save.
         When resolve_account is provided, Posting.account_id is the real ID.
     """
-    from datetime import date as dt_date
-
-    from pyfintracker.exceptions import AccountNotFoundError
-    from pyfintracker.models import Posting, Transaction
-    from pyfintracker.validation import validate_amount
-
     if not sys.stdin.isatty():
         raise ReplRequiresTTYError(
             "REPL requires interactive terminal; use --from/--to for non-interactive entry"
         )
 
-    # ── Date ───────────────────────────────────────────────────────────
     raw_date = _repl_prompt(prompt_fn, "Date (YYYY-MM-DD)")
     parts = raw_date.split("-")
-    txn_date = dt_date(int(parts[0]), int(parts[1]), int(parts[2]))
+    txn_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
 
-    # ── Description ────────────────────────────────────────────────────
     description = _repl_prompt(prompt_fn, "Description")
-
-    # ── Currency ───────────────────────────────────────────────────────
     currency = _repl_prompt(prompt_fn, "Currency", "COP").upper()
 
-    # ── Posting loop ───────────────────────────────────────────────────
     postings: list[Posting] = []
     balance = Decimal("0")
 
@@ -661,18 +574,17 @@ def repl_add_postings(
         amount = _parse_repl_amount(raw_amount)
         amount = validate_amount(amount, currency)
 
+        account_id = 0
         if resolve_account is not None:
-            try:
-                account_id = resolve_account(account_name)
-            except AccountNotFoundError as e:
-                console.print(f"[red]Error:[/red] {e}")
+            resolved = resolve_account(account_name)
+            if resolved is None:
+                console.print(f"[red]Error:[/red] Account '{account_name}' not found")
                 if available_accounts:
                     suggestions = _suggest_accounts(account_name, available_accounts)
                     if suggestions:
                         console.print(f"  Did you mean: {', '.join(suggestions)}?")
                 continue  # re-prompt
-        else:
-            account_id = 0
+            account_id = resolved
 
         balance += amount
         postings.append(Posting(account_id=account_id, amount=amount, currency=currency))
@@ -718,17 +630,10 @@ def _run_alembic(engine: Engine, action: str, revision: str) -> None:
 
     This helper avoids re-importing Alembic in every command.
     """
-    from alembic.command import downgrade, upgrade
-    from alembic.config import Config
-
     alembic_cfg = Config("alembic.ini")
 
     if action == "status":
-        from sqlalchemy import text
-
         with engine.connect() as conn:
-            # Query alembic_version directly instead of using current()
-            # (current() writes to sys.stdout which breaks under CliRunner)
             row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
             current_rev = row[0] if row else "(none)"
             print(f"{current_rev} (head)")

@@ -45,21 +45,6 @@ class TestConnectionFixture:
         assert row == 1
 
 
-class TestSessionFixture:
-    """Verify the session fixture works."""
-
-    @pytest.mark.unit
-    def test_session_is_connection(self, session: Connection) -> None:
-        """session fixture yields a Connection."""
-        assert isinstance(session, Connection)
-
-    @pytest.mark.unit
-    def test_can_query(self, session: Connection) -> None:
-        """Can query through session."""
-        row = session.execute(text("SELECT count(*) FROM accounts")).scalar()
-        assert row == 11
-
-
 class TestCliRunner:
     """Verify the cli_runner fixture works."""
 

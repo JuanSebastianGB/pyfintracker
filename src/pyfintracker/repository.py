@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Connection, text
@@ -161,41 +162,42 @@ def create_transaction_with_postings(
     return txn_id
 
 
+def create_opening_balance_transaction(
+    conn: Connection,
+    account: Account,
+    amount: Decimal,
+) -> int:
+    """Create the opening-balance transaction (Dr account, Cr Equity:OpeningBalances).
+
+    Idempotent on the equity account — auto-creates it if missing.
+    Returns the new transaction id.
+    """
+    assert account.id is not None, "account must be persisted before opening balance"
+    assert account.currency is not None
+
+    equity = get_account_by_name(conn, "Equity:OpeningBalances")
+    if equity is None:
+        equity = upsert_account(conn, name="Equity:OpeningBalances", currency=account.currency)
+    assert equity.id is not None
+
+    txn = Transaction(
+        date=date.today(),
+        description=f"Opening balance for {account.name}",
+        currency=account.currency,
+    )
+    postings = [
+        Posting(account_id=account.id, amount=amount, currency=account.currency),
+        Posting(account_id=equity.id, amount=-amount, currency=account.currency),
+    ]
+    return create_transaction_with_postings(conn, txn, postings)
+
+
 # ── Rate repository functions ──────────────────────────────────────────────────
 
 
-def _row_to_rate(row: object) -> Rate:
-    """Convert a raw DB row to Rate.
-
-    Handles SQLite TEXT date→datetime.date and Decimal→str conversions.
-    """
-
-    r: dict[str, Any] = dict(getattr(row, "_mapping", row))  # type: ignore[call-overload]
-
-    # Convert date string to date object if needed
-    if isinstance(r.get("date"), str):
-        r["date"] = date.fromisoformat(r["date"])
-    if isinstance(r.get("fetched_at"), str):
-        from datetime import datetime
-
-        r["fetched_at"] = datetime.fromisoformat(r["fetched_at"])
-
-    # Convert rate string to Decimal
-    from decimal import Decimal
-
-    rate_val = r["rate"]
-    if isinstance(rate_val, str):
-        rate_val = Decimal(rate_val)
-
-    return Rate(
-        id=r.get("id"),
-        date=r["date"],
-        from_ccy=r["base_currency"],
-        to_ccy=r["target_currency"],
-        rate=rate_val,
-        fetched_at=r.get("fetched_at"),
-        source=r.get("source", "frankfurter"),
-    )
+def _row_to_rate(row: Any) -> Rate:
+    """Convert a raw DB row to Rate. Delegates type coercion to ``Rate.from_row``."""
+    return Rate.from_row(row)
 
 
 def get_cached_rate(conn: Connection, from_ccy: str, to_ccy: str, on: date) -> Rate | None:
@@ -285,6 +287,7 @@ def list_cached_rates(
 __all__ = [
     "account_has_postings",
     "create_account",
+    "create_opening_balance_transaction",
     "create_transaction_with_postings",
     "get_account_by_id",
     "get_account_by_name",

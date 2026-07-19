@@ -57,14 +57,14 @@ def _historical_pair(draw: st.DrawFn) -> tuple[date, str, str, Decimal]:
 @given(pair=_historical_pair())
 def test_historical_rate_ttl_ignored(
     pair: tuple[date, str, str, Decimal],
-    session: Connection,
+    connection: Connection,
 ) -> None:
     """A historical cache row 1y-50y old is used; transport is never called."""
     h_date, from_ccy, to_ccy, rate_value = pair
 
     # Seed the cache with a historical rate, fetched_at = now (recent write)
     upsert_rate(
-        session,
+        connection,
         Rate(
             date=h_date,
             from_ccy=from_ccy,
@@ -89,7 +89,7 @@ def test_historical_rate_ttl_ignored(
 
     client = FrankfurterClient(transport=httpx.MockTransport(handler))
 
-    result = get_rate(from_ccy, to_ccy, on=h_date, _client=client, _conn=session)
+    result = get_rate(from_ccy, to_ccy, on=h_date, _client=client, _conn=connection)
 
     # Result equals cached rate, transport was never called
     assert result.rate == rate_value, (

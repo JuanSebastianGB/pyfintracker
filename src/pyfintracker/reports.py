@@ -12,6 +12,14 @@ from rich.panel import Panel
 from rich.table import Table
 from sqlalchemy import Connection, text
 
+from pyfintracker.fx import get_rate
+
+# Per-kind sign flip for the balance report.
+# Liabilities and Equity carry "negative" balances in double-entry (you owe them /
+# they offset Assets), but in a personal-finance balance view they show as
+# positive (you owe that much).
+SIGN_BY_KIND: dict[str, int] = {"Liabilities": -1, "Equity": -1}
+
 
 class MonthlyLine(BaseModel):
     """A single line in a monthly report (one account on one day)."""
@@ -151,7 +159,7 @@ def compute_monthly_report(
         {"year": str(year), "month": f"{month:02d}"},
     ).fetchall()
 
-    # Pre-fetch all distinct rate pairs if cross-currency
+    # Pre-fetch all distinct rate pairs if cross-currency (cache fill only)
     needs_conversion = any(row.currency != display_currency for row in rows)
     if needs_conversion:
         pairs: set[tuple[str, str, date]] = set()
@@ -160,9 +168,8 @@ def compute_monthly_report(
             if posting_ccy != display_currency:
                 txn_date = date.fromisoformat(row.date)
                 pairs.add((posting_ccy, display_currency, txn_date))
-        if pairs:
-            for from_ccy, to_ccy, d in pairs:
-                _convert_amount(Decimal("1"), from_ccy, to_ccy, d, conn=conn)
+        for from_ccy, to_ccy, d in pairs:
+            get_rate(from_ccy, to_ccy, on=d, _conn=conn)
 
     income_entries: list[dict[str, Any]] = []
     expense_entries: list[dict[str, Any]] = []
@@ -227,103 +234,53 @@ def compute_balance(
     Returns:
         A ``BalanceReport`` with per-account lines and net worth.
     """
-    account_rows = conn.execute(
-        text("""
-            SELECT a.id, a.name, a.kind, a.currency, COALESCE(SUM(p.amount), '0') as balance
-            FROM accounts a
-            LEFT JOIN postings p ON a.id = p.account_id
-            GROUP BY a.id
-            ORDER BY a.name
-        """),
-    ).fetchall()
+    # ponytail: per-posting path handles both single-currency and cross-currency.
+    # Single-path avoids dual SQL implementations that drift apart.
+    sql = """
+        SELECT a.name, a.kind, p.currency as posting_ccy, p.amount, t.date
+        FROM postings p
+        JOIN accounts a ON p.account_id = a.id
+        JOIN transactions t ON p.transaction_id = t.id
+        WHERE a.kind NOT IN ('Income', 'Expenses')
+    """
+    params: dict[str, str] = {}
+    if as_of is not None:
+        sql += " AND t.date <= :as_of"
+        params["as_of"] = str(as_of)
 
-    # For balance we aggregate per account — need per-posting detail for conversion.
-    # If cross-currency, query individual postings instead.
-    if display_currency != "COP" or as_of is not None:
-        posting_query = text("""
-            SELECT a.name, a.kind, p.currency as posting_ccy, p.amount, t.date
-            FROM postings p
-            JOIN accounts a ON p.account_id = a.id
-            JOIN transactions t ON p.transaction_id = t.id
-            WHERE a.kind NOT IN ('Income', 'Expenses')
-            ORDER BY a.name
-        """)
-        if as_of is not None:
-            posting_query = text("""
-                SELECT a.name, a.kind, p.currency as posting_ccy, p.amount, t.date
-                FROM postings p
-                JOIN accounts a ON p.account_id = a.id
-                JOIN transactions t ON p.transaction_id = t.id
-                WHERE a.kind NOT IN ('Income', 'Expenses')
-                  AND t.date <= :as_of
-                ORDER BY a.name
-            """)
+    rows = conn.execute(text(sql), params).fetchall()
 
-        rows = conn.execute(posting_query, {"as_of": str(as_of)} if as_of is not None else {}).fetchall()
+    # Pre-fetch rates if cross-currency (cache fill only)
+    pairs: set[tuple[str, str, date]] = set()
+    for row in rows:
+        txn_date = date.fromisoformat(row.date)
+        if row.posting_ccy != display_currency:
+            pairs.add((row.posting_ccy, display_currency, txn_date))
+    for from_ccy, to_ccy, d in pairs:
+        get_rate(from_ccy, to_ccy, on=d, _conn=conn)
 
-        # Pre-fetch rates if cross-currency
-        if display_currency != "COP":
-            pairs: set[tuple[str, str, date]] = set()
-            for row in rows:
-                txn_date = date.fromisoformat(row.date)
-                if row.posting_ccy != display_currency:
-                    pairs.add((row.posting_ccy, display_currency, txn_date))
-            if pairs:
-                for from_ccy, to_ccy, d in pairs:
-                    _convert_amount(Decimal("1"), from_ccy, to_ccy, d, conn=conn)
+    # Aggregate per account with conversion + per-kind sign flip
+    acct_balances: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name: str = row.name
+        amount = Decimal(row.amount)
+        txn_date = date.fromisoformat(row.date)
+        posting_ccy: str = row.posting_ccy
 
-        # Aggregate per account with conversion
-        acct_balances: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            name: str = row.name
-            amount = Decimal(row.amount)
-            txn_date = date.fromisoformat(row.date)
-            posting_ccy: str = row.posting_ccy
+        if posting_ccy != display_currency:
+            amount = _convert_amount(amount, posting_ccy, display_currency, txn_date, conn=conn)
 
-            if posting_ccy != display_currency:
-                amount = _convert_amount(amount, posting_ccy, display_currency, txn_date, conn=conn)
+        if name not in acct_balances:
+            acct_balances[name] = {"kind": row.kind, "balance": Decimal("0")}
 
-            if name not in acct_balances:
-                acct_balances[name] = {"kind": row.kind, "balance": Decimal("0")}
+        acct_balances[name]["balance"] += SIGN_BY_KIND.get(row.kind, 1) * amount
 
-            if row.kind in ("Liabilities", "Equity"):
-                acct_balances[name]["balance"] -= amount
-            else:
-                acct_balances[name]["balance"] += amount
-
-        lines = [
-            BalanceLine(account_name=name, account_kind=data["kind"], balance=data["balance"])
-            for name, data in acct_balances.items()
-            if data["balance"] != Decimal("0")
-        ]
-        lines.sort(key=lambda ln: ln.account_name)
-
-        net_worth = sum((line.balance for line in lines), Decimal("0"))
-        return BalanceReport(lines=lines, net_worth=net_worth, currency=display_currency)
-
-    # Same-currency fast path (COP-only, no as_of) — original aggregated query
-    lines: list[BalanceLine] = []  # type: ignore[no-redef]
-    for row in account_rows:
-        kind: str = row.kind
-
-        if kind in ("Income", "Expenses"):
-            continue  # P&L accounts excluded from balance
-
-        balance = Decimal(row.balance) if row.balance else Decimal("0")
-
-        if kind in ("Liabilities", "Equity"):
-            balance = -balance
-
-        if balance == Decimal("0"):
-            continue
-
-        lines.append(
-            BalanceLine(
-                account_name=row.name,
-                account_kind=row.kind,
-                balance=balance,
-            )
-        )
+    lines = [
+        BalanceLine(account_name=name, account_kind=data["kind"], balance=data["balance"])
+        for name, data in acct_balances.items()
+        if data["balance"] != Decimal("0")
+    ]
+    lines.sort(key=lambda ln: ln.account_name)
 
     net_worth = sum((line.balance for line in lines), Decimal("0"))
     return BalanceReport(lines=lines, net_worth=net_worth, currency=display_currency)

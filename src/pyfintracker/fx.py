@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import httpx
@@ -22,7 +22,7 @@ from pyfintracker.exceptions import (
 )
 from pyfintracker.models import Rate
 from pyfintracker.repository import get_cached_rate, upsert_rate
-from pyfintracker.validation import PER_CURRENCY_DECIMALS
+from pyfintracker.validation import PER_CURRENCY_DECIMALS, quantize_for_currency
 
 if TYPE_CHECKING:
 
@@ -240,11 +240,7 @@ def get_rate(
     if cached is None:
         inverse = get_cached_rate(conn, to_ccy, from_ccy, lookup_date)
         if inverse is not None and inverse.rate > 0:
-            inverse_rate = Decimal("1") / inverse.rate
-            from pyfintracker.validation import PER_CURRENCY_DECIMALS
-            precision = PER_CURRENCY_DECIMALS.get(from_ccy, 2)
-            quantizer = Decimal("1").scaleb(-precision)
-            inverted = inverse_rate.quantize(quantizer, rounding=ROUND_HALF_UP)
+            inverted = quantize_for_currency(Decimal("1") / inverse.rate, from_ccy)
             # Return as-if direct (from_ccy→to_ccy)
             cached = Rate(
                 date=inverse.date,
