@@ -28,19 +28,14 @@ class TestConnectionFixture:
     def test_migration_tables_exist(self, connection: Connection) -> None:
         """After migration, accounts table exists."""
         row = connection.execute(
-            text(
-                "SELECT count(*) FROM sqlite_master "
-                "WHERE type='table' AND name='accounts'"
-            )
+            text("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='accounts'")
         ).scalar()
         assert row == 1
 
     @pytest.mark.unit
     def test_starter_chart_seeded(self, connection: Connection) -> None:
         """Starter chart accounts exist after migration."""
-        row = connection.execute(
-            text("SELECT count(*) FROM accounts")
-        ).scalar()
+        row = connection.execute(text("SELECT count(*) FROM accounts")).scalar()
         assert row == 11
 
     @pytest.mark.unit

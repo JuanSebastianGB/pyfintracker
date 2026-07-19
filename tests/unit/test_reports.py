@@ -24,7 +24,9 @@ class TestReportsModels:
         """MonthlyLine can be created with all fields."""
         from pyfintracker.reports import MonthlyLine
 
-        line = MonthlyLine(day=15, label="Income:Salary", amount=Decimal("1000"), balance=Decimal("1000"))
+        line = MonthlyLine(
+            day=15, label="Income:Salary", amount=Decimal("1000"), balance=Decimal("1000")
+        )
         assert line.day == 15
         assert line.label == "Income:Salary"
         assert line.amount == Decimal("1000")
@@ -45,10 +47,14 @@ class TestReportsModels:
         report = MonthlyReport(
             year_month="2024-01",
             income_lines=[
-                MonthlyLine(day=15, label="Income:Salary", amount=Decimal("3000"), balance=Decimal("3000")),
+                MonthlyLine(
+                    day=15, label="Income:Salary", amount=Decimal("3000"), balance=Decimal("3000")
+                ),
             ],
             expense_lines=[
-                MonthlyLine(day=3, label="Expenses:Rent", amount=Decimal("1000"), balance=Decimal("-1000")),
+                MonthlyLine(
+                    day=3, label="Expenses:Rent", amount=Decimal("1000"), balance=Decimal("-1000")
+                ),
             ],
             income_total=Decimal("3000"),
             expense_total=Decimal("1000"),
@@ -96,7 +102,9 @@ class TestReportsModels:
         """BalanceLine can be created with all fields."""
         from pyfintracker.reports import BalanceLine
 
-        line = BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("5000"))
+        line = BalanceLine(
+            account_name="Assets:Checking", account_kind="Assets", balance=Decimal("5000")
+        )
         assert line.account_name == "Assets:Checking"
         assert line.account_kind == "Assets"
         assert line.balance == Decimal("5000")
@@ -105,7 +113,9 @@ class TestReportsModels:
         """BalanceLine cannot be modified after creation."""
         from pyfintracker.reports import BalanceLine
 
-        line = BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("5000"))
+        line = BalanceLine(
+            account_name="Assets:Checking", account_kind="Assets", balance=Decimal("5000")
+        )
         with pytest.raises((AttributeError, TypeError, pydantic.ValidationError)):
             line.balance = Decimal("0")  # type: ignore[misc]
 
@@ -115,7 +125,9 @@ class TestReportsModels:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1000")),
+                BalanceLine(
+                    account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1000")
+                ),
             ],
             net_worth=Decimal("1000"),
         )
@@ -198,16 +210,24 @@ def seed_simple_month(reports_engine):
     """
     with reports_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"),
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"
+            ),
         )
         conn.execute(
-            text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Salary', 'COP', 1, 'Income')"),
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Salary', 'COP', 1, 'Income')"
+            ),
         )
         conn.execute(
-            text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Rent', 'COP', 1, 'Expenses')"),
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Rent', 'COP', 1, 'Expenses')"
+            ),
         )
         conn.execute(
-            text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Food:Groceries', 'COP', 2, 'Expenses')"),
+            text(
+                "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Food:Groceries', 'COP', 2, 'Expenses')"
+            ),
         )
         rows = conn.execute(text("SELECT id, name FROM accounts ORDER BY id")).fetchall()
     accounts = {r.name: r.id for r in rows}
@@ -232,7 +252,9 @@ def seed_simple_month(reports_engine):
 
     txn3 = Transaction(date=date(2024, 1, 20), description="Groceries")
     postings3 = [
-        Posting(account_id=accounts["Expenses:Food:Groceries"], amount=Decimal("250000"), currency="COP"),
+        Posting(
+            account_id=accounts["Expenses:Food:Groceries"], amount=Decimal("250000"), currency="COP"
+        ),
         Posting(account_id=accounts["Assets:Checking"], amount=Decimal("-250000"), currency="COP"),
     ]
     with get_session(reports_engine) as conn:
@@ -305,8 +327,9 @@ class TestComputeMonthlyReport:
         """Invalid year_month format raises ValueError."""
         from pyfintracker.reports import compute_monthly_report
 
-        with get_session(reports_engine) as conn, pytest.raises(
-            ValueError, match="Invalid year_month format"
+        with (
+            get_session(reports_engine) as conn,
+            pytest.raises(ValueError, match="Invalid year_month format"),
         ):
             compute_monthly_report(conn, "2024/01")
 
@@ -317,9 +340,13 @@ class TestComputeMonthlyReport:
         # Add another income on the same day
         with reports_engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Bonus', 'COP', 1, 'Income')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Bonus', 'COP', 1, 'Income')"
+                ),
             )
-            accts = {r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()}
+            accts = {
+                r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()
+            }
 
         from pyfintracker.repository import create_transaction_with_postings
 
@@ -387,7 +414,9 @@ class TestComputeBalance:
         # Add a second asset account
         with reports_engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Savings', 'COP', 1, 'Assets')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Savings', 'COP', 1, 'Assets')"
+                ),
             )
 
         with get_session(reports_engine) as conn:
@@ -404,18 +433,28 @@ class TestComputeBalance:
 
         with reports_engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Liabilities:CreditCard', 'COP', 1, 'Liabilities')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Liabilities:CreditCard', 'COP', 1, 'Liabilities')"
+                ),
             )
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Checking', 'COP', 1, 'Assets')"
+                ),
             )
-            accts = {r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()}
+            accts = {
+                r.name: r.id for r in conn.execute(text("SELECT id, name FROM accounts")).fetchall()
+            }
 
         from pyfintracker.repository import create_transaction_with_postings
 
         txn = Transaction(date=date(2024, 1, 1), description="CC charge")
         postings = [
-            Posting(account_id=accts["Liabilities:CreditCard"], amount=Decimal("-500000"), currency="COP"),
+            Posting(
+                account_id=accts["Liabilities:CreditCard"],
+                amount=Decimal("-500000"),
+                currency="COP",
+            ),
             Posting(account_id=accts["Assets:Checking"], amount=Decimal("500000"), currency="COP"),
         ]
         with get_session(reports_engine) as conn:
@@ -435,7 +474,9 @@ class TestComputeBalance:
 
         with reports_engine.begin() as conn:
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Empty', 'COP', 1, 'Assets')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Empty', 'COP', 1, 'Assets')"
+                ),
             )
 
         with get_session(reports_engine) as conn:
@@ -603,9 +644,7 @@ class TestToLinesProperty:
 
         # 3. Final running balance equals total sum (when sorted is non-empty).
         if lines:
-            assert lines[-1].balance == sum(
-                (Decimal(amt) for _, _, amt in entries), Decimal("0")
-            )
+            assert lines[-1].balance == sum((Decimal(amt) for _, _, amt in entries), Decimal("0"))
 
         # 4. Output is sorted by (day, label).
         keys = [(line.day, line.label) for line in lines]

@@ -70,13 +70,19 @@ class TestCreateTransaction:
     def seed_accounts(self, engine):
         with get_session(engine) as conn:
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Cash', 'COP', 1, 'Assets')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Assets:Cash', 'COP', 1, 'Assets')"
+                ),
             )
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Food', 'COP', 1, 'Expenses')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Expenses:Food', 'COP', 1, 'Expenses')"
+                ),
             )
             conn.execute(
-                text("INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Salary', 'COP', 1, 'Income')"),
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) VALUES ('Income:Salary', 'COP', 1, 'Income')"
+                ),
             )
         # Read back IDs
         with engine.begin() as conn:
@@ -89,8 +95,12 @@ class TestCreateTransaction:
 
         txn = Transaction(date=date(2024, 1, 15), description="Grocery run")
         postings = [
-            Posting(account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"),
-            Posting(account_id=seed_accounts["Assets:Cash"], amount=Decimal("-50000"), currency="COP"),
+            Posting(
+                account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"
+            ),
+            Posting(
+                account_id=seed_accounts["Assets:Cash"], amount=Decimal("-50000"), currency="COP"
+            ),
         ]
         with get_session(engine) as conn:
             txn_id = create_transaction_with_postings(conn, txn, postings)
@@ -104,8 +114,12 @@ class TestCreateTransaction:
 
         txn = Transaction(date=date(2024, 1, 15), description="Grocery run")
         postings = [
-            Posting(account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"),
-            Posting(account_id=seed_accounts["Assets:Cash"], amount=Decimal("-50000"), currency="COP"),
+            Posting(
+                account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"
+            ),
+            Posting(
+                account_id=seed_accounts["Assets:Cash"], amount=Decimal("-50000"), currency="COP"
+            ),
         ]
         with get_session(engine) as conn:
             create_transaction_with_postings(conn, txn, postings)
@@ -122,8 +136,12 @@ class TestCreateTransaction:
 
         txn = Transaction(date=date(2024, 1, 15), description="Bad txn")
         postings = [
-            Posting(account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"),
-            Posting(account_id=seed_accounts["Assets:Cash"], amount=Decimal("-30000"), currency="COP"),
+            Posting(
+                account_id=seed_accounts["Expenses:Food"], amount=Decimal("50000"), currency="COP"
+            ),
+            Posting(
+                account_id=seed_accounts["Assets:Cash"], amount=Decimal("-30000"), currency="COP"
+            ),
         ]
         with pytest.raises(UnbalancedTransaction), get_session(engine) as conn:
             create_transaction_with_postings(conn, txn, postings)

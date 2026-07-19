@@ -23,7 +23,8 @@ def _init_and_seed(tmp_path: Path, cli_runner: CliRunner) -> Path:
     # Create a few custom accounts (not in starter chart)
     for acct in ["Assets:Wallet", "Expenses:Food:Delivery"]:
         result = cli_runner.invoke(
-            app, ["account", "new", acct, "--currency", "COP"],
+            app,
+            ["account", "new", acct, "--currency", "COP"],
             env={"FIN_DB_PATH": str(db_path)},
         )
         assert result.exit_code == 0, result.stdout
@@ -39,10 +40,19 @@ def test_add_two_postings(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Wallet", "--to", "Expenses:Food:Delivery",
-            "--amount", "50000", "--currency", "COP",
-            "--description", "Lunch with team",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Wallet",
+            "--to",
+            "Expenses:Food:Delivery",
+            "--amount",
+            "50000",
+            "--currency",
+            "COP",
+            "--description",
+            "Lunch with team",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -77,9 +87,17 @@ def test_add_default_currency(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Wallet", "--to", "Expenses:Food:Delivery",
-            "--amount", "25000", "--description", "Snacks",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Wallet",
+            "--to",
+            "Expenses:Food:Delivery",
+            "--amount",
+            "25000",
+            "--description",
+            "Snacks",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -101,9 +119,17 @@ def test_add_invalid_from_account(tmp_path: Path, cli_runner: CliRunner) -> None
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Nope", "--to", "Expenses:Food:Delivery",
-            "--amount", "100", "--description", "Should fail",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Nope",
+            "--to",
+            "Expenses:Food:Delivery",
+            "--amount",
+            "100",
+            "--description",
+            "Should fail",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -117,13 +143,18 @@ def test_add_invalid_to_account(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Wallet", "--to", "Income:Mystery",
-            "--amount", "100", "--description", "Should fail",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Wallet",
+            "--to",
+            "Income:Mystery",
+            "--amount",
+            "100",
+            "--description",
+            "Should fail",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code != 0
-
-
-

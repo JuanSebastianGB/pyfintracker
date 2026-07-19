@@ -6,7 +6,7 @@ fully migrated in-memory SQLite database with the 0001 schema + starter chart.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -35,7 +35,9 @@ class TestUpsertRate:
 
         # Only 1 row in DB
         rows = session.execute(
-            text("SELECT count(*) FROM rates WHERE base_currency='USD' AND target_currency='COP' AND date='2026-07-18'")
+            text(
+                "SELECT count(*) FROM rates WHERE base_currency='USD' AND target_currency='COP' AND date='2026-07-18'"
+            )
         ).scalar()
         assert rows == 1
 
@@ -49,7 +51,9 @@ class TestUpsertRate:
 
         assert result.rate == Decimal("3300.00")
         rows = session.execute(
-            text("SELECT count(*) FROM rates WHERE base_currency='USD' AND target_currency='COP' AND date='2026-07-18'")
+            text(
+                "SELECT count(*) FROM rates WHERE base_currency='USD' AND target_currency='COP' AND date='2026-07-18'"
+            )
         ).scalar()
         assert rows == 1
 
@@ -95,16 +99,28 @@ class TestListCachedRates:
 
     def test_list_cached_rates(self, session: Connection) -> None:
         """list_cached_rates returns all stored rates."""
-        upsert_rate(session, Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")))
-        upsert_rate(session, Rate(date=date(2026, 7, 18), from_ccy="EUR", to_ccy="COP", rate=Decimal("4200.00")))
+        upsert_rate(
+            session,
+            Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")),
+        )
+        upsert_rate(
+            session,
+            Rate(date=date(2026, 7, 18), from_ccy="EUR", to_ccy="COP", rate=Decimal("4200.00")),
+        )
 
         rates = list_cached_rates(session)
         assert len(rates) == 2
 
     def test_list_cached_rates_since(self, session: Connection) -> None:
         """list_cached_rates(since=date) filters by date."""
-        upsert_rate(session, Rate(date=date(2026, 7, 1), from_ccy="USD", to_ccy="COP", rate=Decimal("3000.00")))
-        upsert_rate(session, Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")))
+        upsert_rate(
+            session,
+            Rate(date=date(2026, 7, 1), from_ccy="USD", to_ccy="COP", rate=Decimal("3000.00")),
+        )
+        upsert_rate(
+            session,
+            Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")),
+        )
 
         rates = list_cached_rates(session, since=date(2026, 7, 15))
         assert len(rates) == 1

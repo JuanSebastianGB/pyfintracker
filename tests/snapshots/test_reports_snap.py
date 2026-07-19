@@ -176,7 +176,11 @@ class TestRenderBalance:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1550000")),
+                BalanceLine(
+                    account_name="Assets:Checking",
+                    account_kind="Assets",
+                    balance=Decimal("1550000"),
+                ),
             ],
             net_worth=Decimal("1550000"),
         )
@@ -206,8 +210,16 @@ class TestRenderBalance:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1550000")),
-                BalanceLine(account_name="Liabilities:CreditCard", account_kind="Liabilities", balance=Decimal("500000")),
+                BalanceLine(
+                    account_name="Assets:Checking",
+                    account_kind="Assets",
+                    balance=Decimal("1550000"),
+                ),
+                BalanceLine(
+                    account_name="Liabilities:CreditCard",
+                    account_kind="Liabilities",
+                    balance=Decimal("500000"),
+                ),
             ],
             net_worth=Decimal("1050000"),
         )
@@ -225,8 +237,16 @@ class TestRenderBalance:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1550000")),
-                BalanceLine(account_name="Liabilities:CreditCard", account_kind="Liabilities", balance=Decimal("-50000")),
+                BalanceLine(
+                    account_name="Assets:Checking",
+                    account_kind="Assets",
+                    balance=Decimal("1550000"),
+                ),
+                BalanceLine(
+                    account_name="Liabilities:CreditCard",
+                    account_kind="Liabilities",
+                    balance=Decimal("-50000"),
+                ),
             ],
             net_worth=Decimal("1500000"),
         )
@@ -244,7 +264,11 @@ class TestRenderBalance:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Assets:Checking", account_kind="Assets", balance=Decimal("1550000")),
+                BalanceLine(
+                    account_name="Assets:Checking",
+                    account_kind="Assets",
+                    balance=Decimal("1550000"),
+                ),
             ],
             net_worth=Decimal("1550000"),
         )
@@ -261,7 +285,11 @@ class TestRenderBalance:
 
         report = BalanceReport(
             lines=[
-                BalanceLine(account_name="Liabilities:CreditCard", account_kind="Liabilities", balance=Decimal("-500000")),
+                BalanceLine(
+                    account_name="Liabilities:CreditCard",
+                    account_kind="Liabilities",
+                    balance=Decimal("-500000"),
+                ),
             ],
             net_worth=Decimal("-500000"),
         )

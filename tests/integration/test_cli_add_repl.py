@@ -25,7 +25,9 @@ class TTYCliRunner(CliRunner):
 
     @contextlib.contextmanager
     def isolation(
-        self, *args: Any, **kwargs: Any,
+        self,
+        *args: Any,
+        **kwargs: Any,
     ) -> Iterator[tuple[object, object, object]]:
         with super().isolation(*args, **kwargs) as outputs:
             # CliRunner replaces sys.stdin with a non-TTY _NamedTextIOWrapper.
@@ -48,7 +50,8 @@ def _init_and_seed(tmp_path: Path, cli_runner: CliRunner) -> Path:
 
     for acct in ["Assets:Wallet", "Expenses:Food", "Expenses:Drinks", "Income:Freelance"]:
         result = cli_runner.invoke(
-            app, ["account", "new", acct, "--currency", "COP"],
+            app,
+            ["account", "new", acct, "--currency", "COP"],
             env={"FIN_DB_PATH": str(db_path)},
         )
         assert result.exit_code == 0, result.stdout
@@ -89,18 +92,21 @@ class TestAddRepl:
 
         db_path = _init_and_seed(tmp_path, repl_runner)
 
-        input_data = "\n".join([
-            "2024-01-15",       # date
-            "Grocery run",       # description
-            "COP",               # currency
-            "Expenses:Food",     # account (created by _init_and_seed)
-            "50000",
-            "Assets:Wallet",     # account (created by _init_and_seed)
-            "-50000",
-        ])
+        input_data = "\n".join(
+            [
+                "2024-01-15",  # date
+                "Grocery run",  # description
+                "COP",  # currency
+                "Expenses:Food",  # account (created by _init_and_seed)
+                "50000",
+                "Assets:Wallet",  # account (created by _init_and_seed)
+                "-50000",
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -116,18 +122,21 @@ class TestAddRepl:
 
         db_path = _init_and_seed(tmp_path, repl_runner)
 
-        input_data = "\n".join([
-            "2024-01-15",
-            "Grocery run",
-            "COP",
-            "Expenses:Food",
-            "50000",
-            "Assets:Wallet",
-            "-50000",
-        ])
+        input_data = "\n".join(
+            [
+                "2024-01-15",
+                "Grocery run",
+                "COP",
+                "Expenses:Food",
+                "50000",
+                "Assets:Wallet",
+                "-50000",
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -143,15 +152,18 @@ class TestAddRepl:
 
         db_path = _init_and_seed(tmp_path, repl_runner)
 
-        input_data = "\n".join([
-            "2024-01-15",
-            "Test",
-            "COP",
-            ":abort",
-        ])
+        input_data = "\n".join(
+            [
+                "2024-01-15",
+                "Test",
+                "COP",
+                ":abort",
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -165,20 +177,23 @@ class TestAddRepl:
 
         db_path = _init_and_seed(tmp_path, repl_runner)
 
-        input_data = "\n".join([
-            "2024-06-01",
-            "Split dinner",
-            "COP",
-            "Expenses:Food",
-            "30000",
-            "Expenses:Drinks",
-            "20000",
-            "Assets:Wallet",
-            "-50000",
-        ])
+        input_data = "\n".join(
+            [
+                "2024-06-01",
+                "Split dinner",
+                "COP",
+                "Expenses:Food",
+                "30000",
+                "Expenses:Drinks",
+                "20000",
+                "Assets:Wallet",
+                "-50000",
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -197,20 +212,23 @@ class TestAddRepl:
 
         # REPL always prompts Account → Amount.
         # After unknown "Expenses:Nope" + its amount, resolve fails → retry.
-        input_data = "\n".join([
-            "2024-01-15",
-            "Test retry",
-            "COP",
-            "Expenses:Nope",     # Account → unknown, resolve error
-            "50000",             # Amount (collected before resolve)
-            "Expenses:Food",     # Account → known (retry after error)
-            "50000",             # Amount
-            "Assets:Wallet",     # Account
-            "-50000",            # Amount
-        ])
+        input_data = "\n".join(
+            [
+                "2024-01-15",
+                "Test retry",
+                "COP",
+                "Expenses:Nope",  # Account → unknown, resolve error
+                "50000",  # Amount (collected before resolve)
+                "Expenses:Food",  # Account → known (retry after error)
+                "50000",  # Amount
+                "Assets:Wallet",  # Account
+                "-50000",  # Amount
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -229,20 +247,23 @@ class TestAddRepl:
         # First two postings: 50000 - 20000 = +30000 (unbalanced)
         # Third posting adds -30000 → balanced
         # (postings has UNIQUE(transaction_id, account_id), so each account appears once)
-        input_data = "\n".join([
-            "2024-01-15",
-            "Unbalanced test",
-            "COP",
-            "Expenses:Food",
-            "50000",
-            "Assets:Wallet",
-            "-20000",
-            "Assets:Cash",       # third posting to fix (starter chart account)
-            "-30000",
-        ])
+        input_data = "\n".join(
+            [
+                "2024-01-15",
+                "Unbalanced test",
+                "COP",
+                "Expenses:Food",
+                "50000",
+                "Assets:Wallet",
+                "-20000",
+                "Assets:Cash",  # third posting to fix (starter chart account)
+                "-30000",
+            ]
+        )
 
         result = repl_runner.invoke(
-            app, ["add"],
+            app,
+            ["add"],
             input=input_data,
             env={"FIN_DB_PATH": str(db_path)},
         )
@@ -263,7 +284,8 @@ class TestAddRepl:
         db_path = _init_and_seed(tmp_path, cli_runner)
 
         result = cli_runner.invoke(
-            app, ["add", "--from", "Assets:Wallet"],
+            app,
+            ["add", "--from", "Assets:Wallet"],
             env={"FIN_DB_PATH": str(db_path)},
         )
         assert result.exit_code != 0

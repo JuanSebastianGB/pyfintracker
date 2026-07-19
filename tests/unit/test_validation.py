@@ -346,41 +346,47 @@ class TestValidateAmount:
 # ── T-3.9: validate_amount edge cases (float, NaN, Inf, etc.) ────────────────
 
 
-@pytest.mark.parametrize("value,currency", [
-    (1.5, "COP"),           # float
-    (0.0, "COP"),           # float zero
-    (-1.5, "COP"),          # negative float
-    (Decimal("NaN"), "COP"),
-    (Decimal("Infinity"), "COP"),
-    (Decimal("-Infinity"), "COP"),
-    (Decimal("snan"), "COP"),   # signaling NaN
-    ("", "COP"),            # empty string
-    ("   ", "COP"),         # whitespace
-    ("abc", "COP"),         # non-numeric
-    (None, "COP"),          # None
-    ("12,34", "COP"),       # comma decimal (not period)
-    ("12.34.56", "COP"),    # double dot
-    ({}, "COP"),            # dict
-    ([], "COP"),            # list
-])
+@pytest.mark.parametrize(
+    "value,currency",
+    [
+        (1.5, "COP"),  # float
+        (0.0, "COP"),  # float zero
+        (-1.5, "COP"),  # negative float
+        (Decimal("NaN"), "COP"),
+        (Decimal("Infinity"), "COP"),
+        (Decimal("-Infinity"), "COP"),
+        (Decimal("snan"), "COP"),  # signaling NaN
+        ("", "COP"),  # empty string
+        ("   ", "COP"),  # whitespace
+        ("abc", "COP"),  # non-numeric
+        (None, "COP"),  # None
+        ("12,34", "COP"),  # comma decimal (not period)
+        ("12.34.56", "COP"),  # double dot
+        ({}, "COP"),  # dict
+        ([], "COP"),  # list
+    ],
+)
 def test_validate_amount_rejects_invalid(value: object, currency: str) -> None:
     """Each bad input raises InvalidAmount."""
     with pytest.raises(InvalidAmount):
         validate_amount(value, currency)
 
 
-@pytest.mark.parametrize("value,currency,expected", [
-    ("123", "COP", Decimal("123")),
-    ("123.456", "COP", Decimal("123")),  # COP rounds to 0 places
-    ("123.456", "USD", Decimal("123.46")),  # USD rounds HALF_UP
-    ("123.454", "USD", Decimal("123.45")),  # USD rounds HALF_UP
-    (1, "COP", Decimal("1")),               # int accepted
-    ("0.001", "COP", Decimal("0")),         # COP rounds to 0
-    ("0.001", "JPY", Decimal("0")),
-    ("99.9999", "USD", Decimal("100.00")),  # USD rounds HALF_UP
-    ("0", "COP", Decimal("0")),
-    ("-123.456", "USD", Decimal("-123.46")),
-])
+@pytest.mark.parametrize(
+    "value,currency,expected",
+    [
+        ("123", "COP", Decimal("123")),
+        ("123.456", "COP", Decimal("123")),  # COP rounds to 0 places
+        ("123.456", "USD", Decimal("123.46")),  # USD rounds HALF_UP
+        ("123.454", "USD", Decimal("123.45")),  # USD rounds HALF_UP
+        (1, "COP", Decimal("1")),  # int accepted
+        ("0.001", "COP", Decimal("0")),  # COP rounds to 0
+        ("0.001", "JPY", Decimal("0")),
+        ("99.9999", "USD", Decimal("100.00")),  # USD rounds HALF_UP
+        ("0", "COP", Decimal("0")),
+        ("-123.456", "USD", Decimal("-123.46")),
+    ],
+)
 def test_validate_amount_accepts_valid(value: object, currency: str, expected: Decimal) -> None:
     """Valid inputs return quantized Decimal."""
     result = validate_amount(value, currency)
@@ -391,32 +397,35 @@ def test_validate_amount_accepts_valid(value: object, currency: str, expected: D
 # ── T-3.10: quantize_for_currency parametrized per currency ──────────────────
 
 
-@pytest.mark.parametrize("amount,currency,expected", [
-    # COP (0 decimals)
-    (Decimal("99.5"), "COP", Decimal("100")),
-    (Decimal("99.4"), "COP", Decimal("99")),
-    (Decimal("0.1"), "COP", Decimal("0")),
-    (Decimal("999999.99"), "COP", Decimal("1000000")),
-    (Decimal("-99.5"), "COP", Decimal("-100")),
-    # JPY (0 decimals)
-    (Decimal("99.5"), "JPY", Decimal("100")),
-    (Decimal("99.4"), "JPY", Decimal("99")),
-    # USD (2 decimals)
-    (Decimal("99.456"), "USD", Decimal("99.46")),
-    (Decimal("99.454"), "USD", Decimal("99.45")),
-    (Decimal("99.5"), "USD", Decimal("99.50")),
-    (Decimal("0.005"), "USD", Decimal("0.01")),
-    (Decimal("-0.005"), "USD", Decimal("-0.01")),
-    # EUR (2 decimals)
-    (Decimal("123.456"), "EUR", Decimal("123.46")),
-    (Decimal("123.454"), "EUR", Decimal("123.45")),
-    # GBP (2 decimals)
-    (Decimal("9.9999"), "GBP", Decimal("10.00")),
-    # Perfect precision preserved
-    (Decimal("100"), "COP", Decimal("100")),
-    (Decimal("100.00"), "USD", Decimal("100.00")),
-    (Decimal("100.00"), "COP", Decimal("100")),
-])
+@pytest.mark.parametrize(
+    "amount,currency,expected",
+    [
+        # COP (0 decimals)
+        (Decimal("99.5"), "COP", Decimal("100")),
+        (Decimal("99.4"), "COP", Decimal("99")),
+        (Decimal("0.1"), "COP", Decimal("0")),
+        (Decimal("999999.99"), "COP", Decimal("1000000")),
+        (Decimal("-99.5"), "COP", Decimal("-100")),
+        # JPY (0 decimals)
+        (Decimal("99.5"), "JPY", Decimal("100")),
+        (Decimal("99.4"), "JPY", Decimal("99")),
+        # USD (2 decimals)
+        (Decimal("99.456"), "USD", Decimal("99.46")),
+        (Decimal("99.454"), "USD", Decimal("99.45")),
+        (Decimal("99.5"), "USD", Decimal("99.50")),
+        (Decimal("0.005"), "USD", Decimal("0.01")),
+        (Decimal("-0.005"), "USD", Decimal("-0.01")),
+        # EUR (2 decimals)
+        (Decimal("123.456"), "EUR", Decimal("123.46")),
+        (Decimal("123.454"), "EUR", Decimal("123.45")),
+        # GBP (2 decimals)
+        (Decimal("9.9999"), "GBP", Decimal("10.00")),
+        # Perfect precision preserved
+        (Decimal("100"), "COP", Decimal("100")),
+        (Decimal("100.00"), "USD", Decimal("100.00")),
+        (Decimal("100.00"), "COP", Decimal("100")),
+    ],
+)
 def test_quantize_for_currency(amount: Decimal, currency: str, expected: Decimal) -> None:
     """Parametrized: quantize_for_currency per currency."""
     result = quantize_for_currency(amount, currency)
@@ -473,7 +482,9 @@ class TestValidateTransaction:
     def test_too_few_postings(self) -> None:
         txn = Transaction(date=date(2024, 1, 15), description="Test")
         with pytest.raises(TooFewPostings):
-            validate_transaction(txn, [Posting(account_id=1, amount=Decimal("100"), currency="COP")])
+            validate_transaction(
+                txn, [Posting(account_id=1, amount=Decimal("100"), currency="COP")]
+            )
 
     def test_no_postings(self) -> None:
         txn = Transaction(date=date(2024, 1, 15), description="Test")

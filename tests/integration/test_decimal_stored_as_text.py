@@ -21,7 +21,9 @@ class TestDecimalStoredAsText:
         """Insert a posting with Decimal and verify TEXT storage."""
         # Create a transaction first
         tx_id = connection.execute(
-            text("INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Test') RETURNING id"),
+            text(
+                "INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Test') RETURNING id"
+            ),
         ).scalar()
 
         # Get an account id from the starter chart
@@ -32,7 +34,9 @@ class TestDecimalStoredAsText:
         # Insert a posting with a Decimal amount (must be high-precision to test roundtrip)
         original = Decimal("123.456789")
         connection.execute(
-            text("INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"),
+            text(
+                "INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"
+            ),
             {"tid": tx_id, "aid": acct_id, "amt": str(original), "cur": "COP"},
         )
 
@@ -69,7 +73,9 @@ class TestDecimalStoredAsText:
         )
 
         row = connection.execute(
-            text("SELECT rate, typeof(rate) FROM rates WHERE base_currency = 'USD' AND target_currency = 'COP'"),
+            text(
+                "SELECT rate, typeof(rate) FROM rates WHERE base_currency = 'USD' AND target_currency = 'COP'"
+            ),
         ).fetchone()
 
         assert row is not None
@@ -81,7 +87,9 @@ class TestDecimalStoredAsText:
     def test_decimal_high_precision_roundtrip(self, connection: Connection) -> None:
         """Very high precision Decimal survives roundtrip unchanged."""
         tx_id = connection.execute(
-            text("INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Precision') RETURNING id"),
+            text(
+                "INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Precision') RETURNING id"
+            ),
         ).scalar()
         acct_id = connection.execute(
             text("SELECT id FROM accounts WHERE name = 'Assets:Checking'"),
@@ -90,7 +98,9 @@ class TestDecimalStoredAsText:
         # A 20-decimal-place value
         high_precision = Decimal("999999999.12345678901234567890")
         connection.execute(
-            text("INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"),
+            text(
+                "INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"
+            ),
             {"tid": tx_id, "aid": acct_id, "amt": str(high_precision), "cur": "USD"},
         )
 
