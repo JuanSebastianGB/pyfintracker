@@ -86,9 +86,7 @@ def _to_lines(entries: list[dict[str, Any]]) -> list[MonthlyLine]:
     return lines
 
 
-def compute_monthly_report(
-    conn: Connection, year_month: str
-) -> MonthlyReport:
+def compute_monthly_report(conn: Connection, year_month: str) -> MonthlyReport:
     """Compute a monthly income/expense report for the given ``year_month``.
 
     Args:
@@ -107,9 +105,7 @@ def compute_monthly_report(
         or not year_month[:4].isdigit()
         or not year_month[5:].isdigit()
     ):
-        raise ValueError(
-            f"Invalid year_month format: '{year_month}'. Expected YYYY-MM."
-        )
+        raise ValueError(f"Invalid year_month format: '{year_month}'. Expected YYYY-MM.")
 
     year = int(year_month[:4])
     month = int(year_month[5:])
@@ -267,7 +263,10 @@ def render_monthly_report(report: MonthlyReport, console: Console) -> None:
 
         # Footer: bold total
         table.add_row(
-            "", "[bold]Total[/bold]", _style_amount(total, console), "",  # last col empty
+            "",
+            "[bold]Total[/bold]",
+            _style_amount(total, console),
+            "",  # last col empty
         )
         table.columns[2].footer = _fmt(total)
         console.print(table)

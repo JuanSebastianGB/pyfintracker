@@ -25,25 +25,42 @@ def _init_and_seed(tmp_path: Path, cli_runner: CliRunner) -> Path:
     # Create accounts for income and expense
     for acct in ["Income:Freelance", "Expenses:Groceries"]:
         result = cli_runner.invoke(
-            app, ["account", "new", acct, "--currency", "COP"],
+            app,
+            ["account", "new", acct, "--currency", "COP"],
             env={"FIN_DB_PATH": str(db_path)},
         )
         assert result.exit_code == 0, result.stdout
 
     # Add transactions (they get today's date, so update to 2024-01 below)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Income:Freelance", "--to", "Assets:Checking",
-            "--amount", "2000000", "--description", "Freelance payment Jan",
+        app,
+        [
+            "add",
+            "--from",
+            "Income:Freelance",
+            "--to",
+            "Assets:Checking",
+            "--amount",
+            "2000000",
+            "--description",
+            "Freelance payment Jan",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
 
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Checking", "--to", "Expenses:Groceries",
-            "--amount", "150000", "--description", "Weekly groceries",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Checking",
+            "--to",
+            "Expenses:Groceries",
+            "--amount",
+            "150000",
+            "--description",
+            "Weekly groceries",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -52,9 +69,7 @@ def _init_and_seed(tmp_path: Path, cli_runner: CliRunner) -> Path:
     # Rewrite transaction dates to 2024-01 so month filter finds them
     engine = make_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
-        conn.execute(
-            text("UPDATE transactions SET date = '2024-01-15'")
-        )
+        conn.execute(text("UPDATE transactions SET date = '2024-01-15'"))
 
     return db_path
 
@@ -69,7 +84,8 @@ def test_report_month_default(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month"],
+        app,
+        ["report", "month"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -83,7 +99,8 @@ def test_report_month_specific(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "2024-01"],
+        app,
+        ["report", "month", "--month", "2024-01"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -99,7 +116,8 @@ def test_report_month_shows_amounts(tmp_path: Path, cli_runner: CliRunner) -> No
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "2024-01"],
+        app,
+        ["report", "month", "--month", "2024-01"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -116,7 +134,8 @@ def test_report_month_invalid_format(tmp_path: Path, cli_runner: CliRunner) -> N
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "2024/01"],
+        app,
+        ["report", "month", "--month", "2024/01"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1, result.stdout
@@ -130,7 +149,8 @@ def test_report_month_bad_format(tmp_path: Path, cli_runner: CliRunner) -> None:
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "2024-1"],
+        app,
+        ["report", "month", "--month", "2024-1"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1, result.stdout
@@ -143,7 +163,8 @@ def test_report_month_non_numeric(tmp_path: Path, cli_runner: CliRunner) -> None
     db_path = _init_and_seed(tmp_path, cli_runner)
 
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "abc-def"],
+        app,
+        ["report", "month", "--month", "abc-def"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1, result.stdout

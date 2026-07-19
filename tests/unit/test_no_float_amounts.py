@@ -36,10 +36,7 @@ def _check_module(name: str) -> None:
     with open(path) as f:
         tree = ast.parse(f.read())
     if _has_float_annotation(tree):
-        pytest.fail(
-            f"{name}.py contains 'float' annotation. "
-            "Use Decimal for money amounts."
-        )
+        pytest.fail(f"{name}.py contains 'float' annotation. Use Decimal for money amounts.")
 
 
 def test_no_float_in_models() -> None:

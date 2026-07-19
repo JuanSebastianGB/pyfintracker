@@ -51,8 +51,7 @@ def test_quantization_per_currency(
         # Rounding error < 1 unit in the last place
         ulp = Decimal("1").scaleb(-expected_places)
         assert abs(result - amount) < ulp, (
-            f"Rounding error {abs(result - amount)} >= 1 ulp ({ulp}) "
-            f"for {amount} in {currency}"
+            f"Rounding error {abs(result - amount)} >= 1 ulp ({ulp}) for {amount} in {currency}"
         )
 
 

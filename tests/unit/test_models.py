@@ -112,8 +112,12 @@ class TestAccountRowConversion:
     def test_to_row_with_parent_id(self) -> None:
         """to_row() includes parent_id when set."""
         acct = Account(
-            id=5, name="Expenses:Food:Groceries", parent_id=3,
-            currency="COP", depth=2, kind="Expenses",
+            id=5,
+            name="Expenses:Food:Groceries",
+            parent_id=3,
+            currency="COP",
+            depth=2,
+            kind="Expenses",
         )
         row = acct.to_row()
         assert row["parent_id"] == 3
@@ -121,8 +125,11 @@ class TestAccountRowConversion:
     def test_to_row_archived(self) -> None:
         """to_row() sets is_archived=1 when archived."""
         acct = Account(
-            name="Liabilities:CreditCard", currency="COP", depth=1,
-            kind="Liabilities", is_archived=True,
+            name="Liabilities:CreditCard",
+            currency="COP",
+            depth=1,
+            kind="Liabilities",
+            is_archived=True,
         )
         row = acct.to_row()
         assert row["is_archived"] == 1
@@ -140,7 +147,15 @@ class TestAccountRowConversion:
 
     def test_from_row_roundtrip_with_id(self) -> None:
         """from_row(to_row(account)) == account with explicit id."""
-        acct = Account(id=10, name="Expenses:Rent", parent_id=7, currency="USD", depth=1, kind="Expenses", is_archived=True)
+        acct = Account(
+            id=10,
+            name="Expenses:Rent",
+            parent_id=7,
+            currency="USD",
+            depth=1,
+            kind="Expenses",
+            is_archived=True,
+        )
         row = acct.to_row()
         row_data = dict(row)
         mock_row = MagicMock()
@@ -184,8 +199,13 @@ class TestPosting:
         assert row["account_id"] == 1
 
     def test_from_row(self) -> None:
-        row = {"id": 10, "transaction_id": 5, "account_id": 1,
-               "amount": Decimal("100.00"), "currency": "COP"}
+        row = {
+            "id": 10,
+            "transaction_id": 5,
+            "account_id": 1,
+            "amount": Decimal("100.00"),
+            "currency": "COP",
+        }
         p = Posting.from_row(row)
         assert p.id == 10
         assert p.amount == Decimal("100.00")

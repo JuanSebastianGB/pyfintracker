@@ -53,7 +53,9 @@ def test_exit_0_account_list(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "list"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["account", "list"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0
 
@@ -67,7 +69,9 @@ def test_exit_1_invalid_account_name(tmp_path: Path, cli_runner: CliRunner) -> N
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "invalid"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["account", "new", "invalid"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1
 
@@ -78,10 +82,14 @@ def test_exit_1_duplicate_account(tmp_path: Path, cli_runner: CliRunner) -> None
 
     db_path = _init_db(tmp_path, cli_runner)
     cli_runner.invoke(
-        app, ["account", "new", "Expenses:DupTest"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["account", "new", "Expenses:DupTest"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     result = cli_runner.invoke(
-        app, ["account", "new", "Expenses:DupTest"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["account", "new", "Expenses:DupTest"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1
 
@@ -92,7 +100,8 @@ def test_exit_1_invalid_currency(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:X", "--currency", "XXX"],
+        app,
+        ["account", "new", "Assets:X", "--currency", "XXX"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1
@@ -104,9 +113,17 @@ def test_exit_1_unknown_from_account(tmp_path: Path, cli_runner: CliRunner) -> N
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Fake", "--to", "Expenses:Food:Groceries",
-            "--amount", "100", "--description", "test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Fake",
+            "--to",
+            "Expenses:Food:Groceries",
+            "--amount",
+            "100",
+            "--description",
+            "test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -119,9 +136,17 @@ def test_exit_1_unknown_to_account(tmp_path: Path, cli_runner: CliRunner) -> Non
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Checking", "--to", "Expenses:Fake",
-            "--amount", "100", "--description", "test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Checking",
+            "--to",
+            "Expenses:Fake",
+            "--amount",
+            "100",
+            "--description",
+            "test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -137,7 +162,9 @@ def test_exit_2_repl_non_tty(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["add"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["add"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 2
 
@@ -148,7 +175,9 @@ def test_exit_2_partial_flags(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["add", "--from", "Assets:Checking"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["add", "--from", "Assets:Checking"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 2
 
@@ -162,9 +191,17 @@ def test_exit_3_add_no_init(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = tmp_path / "noinit" / "fin.db"
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Checking", "--to", "Expenses:Food:Groceries",
-            "--amount", "100", "--description", "test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Checking",
+            "--to",
+            "Expenses:Food:Groceries",
+            "--amount",
+            "100",
+            "--description",
+            "test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -181,7 +218,8 @@ def test_exit_3_report_month_no_init(tmp_path: Path, cli_runner: CliRunner) -> N
 
     db_path = tmp_path / "noinit" / "fin.db"
     result = cli_runner.invoke(
-        app, ["report", "month", "--month", "2024-01"],
+        app,
+        ["report", "month", "--month", "2024-01"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code in (1, 3), (
@@ -194,7 +232,7 @@ def test_exit_3_report_month_no_init(tmp_path: Path, cli_runner: CliRunner) -> N
 
 @pytest.mark.skip(
     reason="CliRunner overrides sys.stdin with non-TTY stream; "
-           "REPL :abort requires TTY and can't be tested via CliRunner"
+    "REPL :abort requires TTY and can't be tested via CliRunner"
 )
 def test_exit_130_repl_abort(tmp_path: Path, cli_runner: CliRunner) -> None:
     """REPL ``:abort`` exits 130. (requires TTY — cannot test under CliRunner)."""

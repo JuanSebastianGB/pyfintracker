@@ -25,14 +25,16 @@ def _init_db(tmp_path: Path, cli_runner: CliRunner) -> Path:
 
 
 def test_validation_error_invalid_account_name(
-    tmp_path: Path, cli_runner: CliRunner,
+    tmp_path: Path,
+    cli_runner: CliRunner,
 ) -> None:
     """Invalid account name shows red Panel with 'Validation Error' title."""
     from pyfintracker.cli import app
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "invalid"],
+        app,
+        ["account", "new", "invalid"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1
@@ -40,7 +42,8 @@ def test_validation_error_invalid_account_name(
 
 
 def test_validation_error_invalid_amount(
-    tmp_path: Path, cli_runner: CliRunner,
+    tmp_path: Path,
+    cli_runner: CliRunner,
 ) -> None:
     """Invalid amount shows red Panel with 'Validation Error' title."""
     from pyfintracker.cli import app
@@ -48,9 +51,17 @@ def test_validation_error_invalid_amount(
     # Zero-amount should be rejected by validation
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Checking", "--to", "Expenses:Food:Groceries",
-            "--amount", "0", "--description", "Test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Checking",
+            "--to",
+            "Expenses:Food:Groceries",
+            "--amount",
+            "0",
+            "--description",
+            "Test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -59,14 +70,16 @@ def test_validation_error_invalid_amount(
 
 
 def test_validation_error_invalid_currency(
-    tmp_path: Path, cli_runner: CliRunner,
+    tmp_path: Path,
+    cli_runner: CliRunner,
 ) -> None:
     """Invalid currency shows red Panel with 'Validation Error' title."""
     from pyfintracker.cli import app
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:Test", "--currency", "XXX"],
+        app,
+        ["account", "new", "Assets:Test", "--currency", "XXX"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1
@@ -77,16 +90,25 @@ def test_validation_error_invalid_currency(
 
 
 def test_account_not_found_from(
-    tmp_path: Path, cli_runner: CliRunner,
+    tmp_path: Path,
+    cli_runner: CliRunner,
 ) -> None:
     """Unknown --from account shows red Panel with 'Account Not Found' title."""
     from pyfintracker.cli import app
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Nonexistent", "--to", "Expenses:Food:Groceries",
-            "--amount", "100", "--description", "Test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Nonexistent",
+            "--to",
+            "Expenses:Food:Groceries",
+            "--amount",
+            "100",
+            "--description",
+            "Test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -95,16 +117,25 @@ def test_account_not_found_from(
 
 
 def test_account_not_found_to(
-    tmp_path: Path, cli_runner: CliRunner,
+    tmp_path: Path,
+    cli_runner: CliRunner,
 ) -> None:
     """Unknown --to account shows red Panel with 'Account Not Found' title."""
     from pyfintracker.cli import app
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, [
-            "add", "--from", "Assets:Checking", "--to", "Expenses:Nowhere",
-            "--amount", "100", "--description", "Test",
+        app,
+        [
+            "add",
+            "--from",
+            "Assets:Checking",
+            "--to",
+            "Expenses:Nowhere",
+            "--amount",
+            "100",
+            "--description",
+            "Test",
         ],
         env={"FIN_DB_PATH": str(db_path)},
     )
@@ -126,7 +157,9 @@ def test_repl_non_tty_plain_error(tmp_path: Path, cli_runner: CliRunner) -> None
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["add"], env={"FIN_DB_PATH": str(db_path)},
+        app,
+        ["add"],
+        env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 2
     assert "REPL requires interactive terminal" in result.stdout + result.stderr
@@ -147,7 +180,7 @@ def test_render_error_validation_red_panel() -> None:
     console = Console(file=StringIO(), width=80)
     error = ValidationError("Test validation error")
     _render_error(error, console)
-    output = console.file.getvalue() if hasattr(console.file, 'getvalue') else str(console.file)
+    output = console.file.getvalue() if hasattr(console.file, "getvalue") else str(console.file)
     assert "Validation Error" in output
 
 
@@ -163,7 +196,7 @@ def test_render_error_account_not_found_red_panel() -> None:
     console = Console(file=StringIO(), width=80)
     error = AccountNotFoundError("Account 'Foo' not found")
     _render_error(error, console)
-    output = console.file.getvalue() if hasattr(console.file, 'getvalue') else str(console.file)
+    output = console.file.getvalue() if hasattr(console.file, "getvalue") else str(console.file)
     assert "Account Not Found" in output
 
 
@@ -179,7 +212,7 @@ def test_render_error_config_yellow_panel() -> None:
     console = Console(file=StringIO(), width=80)
     error = ConfigError("Config file not found")
     _render_error(error, console)
-    output = console.file.getvalue() if hasattr(console.file, 'getvalue') else str(console.file)
+    output = console.file.getvalue() if hasattr(console.file, "getvalue") else str(console.file)
     assert "Configuration Error" in output or "Config" in output
 
 
@@ -195,7 +228,7 @@ def test_render_error_repl_plain_stderr() -> None:
     console = Console(file=StringIO(), width=80)
     error = ReplRequiresTTYError("REPL needs TTY")
     _render_error(error, console)
-    output = console.file.getvalue() if hasattr(console.file, 'getvalue') else str(console.file)
+    output = console.file.getvalue() if hasattr(console.file, "getvalue") else str(console.file)
     # No Panel characters should appear (╭─, │, ╰─)
     assert "╭─" not in output, "REPL error should not have a panel border"
     assert "REPL Error" in output or "REPL" in output
@@ -213,5 +246,5 @@ def test_render_error_unknown_plain() -> None:
     console = Console(file=StringIO(), width=80)
     error = FinanceError("Generic error")
     _render_error(error, console)
-    output = console.file.getvalue() if hasattr(console.file, 'getvalue') else str(console.file)
+    output = console.file.getvalue() if hasattr(console.file, "getvalue") else str(console.file)
     assert "╭─" not in output, "Unknown error should not have a panel"
