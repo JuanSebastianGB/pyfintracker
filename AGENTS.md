@@ -90,6 +90,16 @@ uv run alembic revision --autogenerate -m "..."  # new migration
 - Don't add FastAPI or any web framework — this is a CLI.
 - Don't publish to PyPI before v1.0 stability.
 - Don't delete the `latest-main` tag — `.github/workflows/sync-main-tag.yml` force-moves it to main's HEAD on every push; deleting it drops the reference pointer the rest of the toolchain can rely on.
+- Don't tag releases manually or create GitHub Releases by hand — `.github/workflows/release-please.yml` opens a Release PR on every push with conventional commits; merging it tags the version (`vX.Y.Z`) and publishes the GitHub Release. Manual tagging will collide with release-please's labels and break the next release.
+
+## Releases
+
+- Conventional commits drive everything: `feat:` → minor, `fix:` → patch, `feat!:`/`fix!:` → major.
+- Tag format: `vX.Y.Z`. pyproject.toml version is bumped automatically.
+- CHANGELOG.md is auto-generated and committed by release-please on the Release PR.
+- Merge the Release PR to actually cut a release. Squash-merge recommended.
+- To force a specific version (e.g. `1.0.0`), include `Release-As: 1.0.0` in a commit body.
+- `latest-main` (moving) and `vX.Y.Z` (immutable releases) coexist; both are force-synced/created by CI.
 
 <!-- engineering-guidelines -->
 ## Engineering Guidelines (universal — apply to all work)
