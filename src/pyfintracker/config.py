@@ -62,7 +62,7 @@ class Settings(BaseSettings):
         description="SQLite journal mode (WAL or DELETE).",
     )
 
-    @property  # type: ignore[misc]
+    @property
     def default_currency(self) -> str:
         """Deprecated: use display_currency."""
         warnings.warn(
@@ -152,9 +152,8 @@ def source_of(field: str, cli_overrides: dict[str, object] | None = None) -> str
         if current in data:
             return "toml"
         # Also check deprecated names in TOML
-        if field != current:
-            if field in data:
-                return "toml"
+        if field != current and field in data:
+            return "toml"
 
     return "default"
 

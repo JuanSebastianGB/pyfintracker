@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
-from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import Connection, text
 
@@ -173,9 +173,8 @@ def _row_to_rate(row: object) -> Rate:
 
     Handles SQLite TEXT date→datetime.date and Decimal→str conversions.
     """
-    from decimal import Decimal
 
-    r = dict(getattr(row, '_mapping', row))  # type: ignore[union-attr]
+    r: dict[str, Any] = dict(getattr(row, '_mapping', row))  # type: ignore[call-overload]
 
     # Convert date string to date object if needed
     if isinstance(r.get("date"), str):
@@ -185,6 +184,8 @@ def _row_to_rate(row: object) -> Rate:
         r["fetched_at"] = datetime.fromisoformat(r["fetched_at"])
 
     # Convert rate string to Decimal
+    from decimal import Decimal
+
     rate_val = r["rate"]
     if isinstance(rate_val, str):
         rate_val = Decimal(rate_val)
@@ -222,7 +223,7 @@ def upsert_rate(conn: Connection, rate: Rate) -> Rate:
     params = rate.to_row()
     params.pop("id", None)  # Let DB auto-generate / ignore on conflict
     # Convert typed objects to strings for SQLite TEXT columns
-    params["date"] = str(params["date"]) if hasattr(params.get("date"), "isoformat") else str(params["date"])
+    params["date"] = str(params["date"])
     params["rate"] = str(params.get("rate", ""))
 
     if params.get("fetched_at") is not None:
