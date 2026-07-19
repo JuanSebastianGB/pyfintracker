@@ -39,9 +39,7 @@ class TestAccountNameRegexProperty:
             ),
         ),
     )
-    def test_valid_names_pass(
-        self, root: str, sub1: str, sub2: str | None
-    ) -> None:
+    def test_valid_names_pass(self, root: str, sub1: str, sub2: str | None) -> None:
         """Generate valid account names in both 2-level and 3-level form."""
         name = f"{root}:{sub1}"
         if sub2 is not None:

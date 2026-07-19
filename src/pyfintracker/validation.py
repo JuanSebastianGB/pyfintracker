@@ -20,21 +20,41 @@ from pyfintracker.exceptions import (
 )
 from pyfintracker.models import Account, Posting, Transaction
 
-ACCOUNT_NAME_RE: re.Pattern[str] = re.compile(
-    r"^[A-Z][a-z]+:[A-Z][\w-]+(:[A-Z][\w-]+)?$"
-)
+ACCOUNT_NAME_RE: re.Pattern[str] = re.compile(r"^[A-Z][a-z]+:[A-Z][\w-]+(:[A-Z][\w-]+)?$")
 
-VALID_CURRENCIES: frozenset[str] = frozenset({"COP", "USD", "EUR", "GBP", "JPY"})
+VALID_CURRENCIES: frozenset[str] = frozenset(
+    {
+        "COP",
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "CAD",
+        "AUD",
+        "CHF",
+        "MXN",
+        "BRL",
+        "INR",
+        "CNY",
+    }
+)
 
 # Per-currency decimal precision (from proposal — contract f)
 # Currencies with 0 decimals: COP, JPY
-# Currencies with 2 decimals: USD, EUR, GBP
+# Currencies with 2 decimals: USD, EUR, GBP, CAD, AUD, CHF, MXN, BRL, INR, CNY
 PER_CURRENCY_DECIMALS: dict[str, int] = {
     "COP": 0,
     "JPY": 0,
     "USD": 2,
     "EUR": 2,
     "GBP": 2,
+    "CAD": 2,
+    "AUD": 2,
+    "CHF": 2,
+    "MXN": 2,
+    "BRL": 2,
+    "INR": 2,
+    "CNY": 2,
 }
 
 
@@ -60,12 +80,11 @@ def validate_account_name(name: str) -> str:
 
 
 def validate_currency(code: str) -> str:
-    """Validate a currency ISO 4217 code (Wave 1: COP/USD/EUR/GBP/JPY only)."""
+    """Validate a currency ISO 4217 code."""
     upper = code.upper()
     if upper not in VALID_CURRENCIES:
         raise InvalidCurrency(
-            f"Unsupported currency: '{code}'. "
-            f"Wave 1 supports: {', '.join(sorted(VALID_CURRENCIES))}"
+            f"Unsupported currency: '{code}'. Supported: {', '.join(sorted(VALID_CURRENCIES))}"
         )
     return upper
 
@@ -168,27 +187,19 @@ def validate_transaction(txn: Transaction, postings: Sequence[Posting]) -> None:
     Order: count >= 2 -> no zero-amount -> single currency -> sum=0.
     """
     if len(postings) < 2:
-        raise TooFewPostings(
-            f"Transaction needs at least 2 postings, got {len(postings)}"
-        )
+        raise TooFewPostings(f"Transaction needs at least 2 postings, got {len(postings)}")
 
     for p in postings:
         if p.amount == Decimal("0"):
-            raise ZeroAmountPosting(
-                f"Posting for account_id={p.account_id} has zero amount"
-            )
+            raise ZeroAmountPosting(f"Posting for account_id={p.account_id} has zero amount")
 
     currencies = {p.currency for p in postings}
     if len(currencies) > 1:
-        raise CurrencyMismatchError(
-            f"All postings must share the same currency, got {currencies}"
-        )
+        raise CurrencyMismatchError(f"All postings must share the same currency, got {currencies}")
 
     total = sum(p.amount for p in postings)
     if total != Decimal("0"):
-        raise UnbalancedTransaction(
-            f"Postings sum to {total}, must sum to 0"
-        )
+        raise UnbalancedTransaction(f"Postings sum to {total}, must sum to 0")
 
 
 def validate_description(desc: str) -> str:

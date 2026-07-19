@@ -94,6 +94,27 @@ class ConfigError(FinanceError):
     code = 3
 
 
+# ── FX errors (exit 4/5/6) ──────────────────────────────────────────────────
+
+
+class RateNotFoundError(FinanceError):
+    """FX rate not found for requested currency pair or date."""
+
+    code = 4
+
+
+class InvalidCurrencyError(FinanceError):
+    """FX-specific currency error (distinct from InvalidCurrency, exit 1)."""
+
+    code = 5
+
+
+class FxUnavailableError(FinanceError):
+    """FX service unavailable (network error, upstream 5xx)."""
+
+    code = 6
+
+
 # ── Runtime errors (exit 2) ────────────────────────────────────────────────
 
 
@@ -108,12 +129,15 @@ __all__ = [
     "ConfigError",
     "CurrencyMismatchError",
     "FinanceError",
+    "FxUnavailableError",
     "InvalidAccountName",
     "InvalidAmount",
     "InvalidCurrency",
+    "InvalidCurrencyError",
     "InvalidDate",
     "InvalidDescription",
     "NotInitializedError",
+    "RateNotFoundError",
     "ReplRequiresTTYError",
     "TooFewPostings",
     "UnbalancedTransaction",

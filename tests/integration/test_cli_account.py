@@ -33,7 +33,8 @@ def test_account_new_creates_account(tmp_path: Path, cli_runner: CliRunner) -> N
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:Investments"],
+        app,
+        ["account", "new", "Assets:Investments"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -56,7 +57,8 @@ def test_account_new_with_currency(tmp_path: Path, cli_runner: CliRunner) -> Non
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:SavingsUSD", "--currency", "USD"],
+        app,
+        ["account", "new", "Assets:SavingsUSD", "--currency", "USD"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -76,7 +78,8 @@ def test_account_new_invalid_name(tmp_path: Path, cli_runner: CliRunner) -> None
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "invalid"],
+        app,
+        ["account", "new", "invalid"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1, (result.stdout, result.stderr)
@@ -90,13 +93,15 @@ def test_account_new_duplicate(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:Duplicate"],
+        app,
+        ["account", "new", "Assets:Duplicate"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
 
     result2 = cli_runner.invoke(
-        app, ["account", "new", "Assets:Duplicate"],
+        app,
+        ["account", "new", "Assets:Duplicate"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result2.exit_code == 1, (result2.stdout, result2.stderr)
@@ -113,7 +118,8 @@ def test_account_list_renders(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -125,7 +131,8 @@ def test_account_list_shows_starter_chart(tmp_path: Path, cli_runner: CliRunner)
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert "Assets:Checking" in result.stdout
@@ -139,12 +146,14 @@ def test_account_list_new_account_appears(tmp_path: Path, cli_runner: CliRunner)
     db_path = _init_db(tmp_path, cli_runner)
     # Create a new account
     cli_runner.invoke(
-        app, ["account", "new", "Expenses:Testing"],
+        app,
+        ["account", "new", "Expenses:Testing"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     # List
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert "Expenses:Testing" in result.stdout
@@ -156,7 +165,8 @@ def test_account_list_headers(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert "ID" in result.stdout
@@ -182,7 +192,8 @@ def test_account_list_starter_chart_count(tmp_path: Path, cli_runner: CliRunner)
     assert count == 11, f"Expected 11 starter accounts, got {count}"
 
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -199,7 +210,8 @@ def test_account_list_after_create(tmp_path: Path, cli_runner: CliRunner) -> Non
 
     # Create one
     cli_runner.invoke(
-        app, ["account", "new", "Expenses:Testing"],
+        app,
+        ["account", "new", "Expenses:Testing"],
         env={"FIN_DB_PATH": str(db_path)},
     )
 
@@ -209,7 +221,8 @@ def test_account_list_after_create(tmp_path: Path, cli_runner: CliRunner) -> Non
     assert count == 12, f"Expected 12 accounts after create, got {count}"
 
     result = cli_runner.invoke(
-        app, ["account", "list"],
+        app,
+        ["account", "list"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 0, result.stdout
@@ -224,7 +237,8 @@ def test_account_new_invalid_currency(tmp_path: Path, cli_runner: CliRunner) -> 
 
     db_path = _init_db(tmp_path, cli_runner)
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:Test", "--currency", "XXX"],
+        app,
+        ["account", "new", "Assets:Test", "--currency", "XXX"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     assert result.exit_code == 1, result.stdout
@@ -236,7 +250,8 @@ def test_account_new_no_db(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     db_path = tmp_path / "nonexistent" / "fin.db"
     result = cli_runner.invoke(
-        app, ["account", "new", "Assets:Test"],
+        app,
+        ["account", "new", "Assets:Test"],
         env={"FIN_DB_PATH": str(db_path)},
     )
     # Either exit 3 (NotInitializedError) or exit 1 (OperationalError)

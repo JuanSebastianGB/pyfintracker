@@ -73,9 +73,7 @@ def _register_pragmas(engine: Engine) -> None:
     """Wire up the PRAGMA event listener on *connect*."""
 
     @event.listens_for(engine, "connect")
-    def _on_connect(
-        dbapi_connection: sqlite3.Connection, _connection_record: object
-    ) -> None:
+    def _on_connect(dbapi_connection: sqlite3.Connection, _connection_record: object) -> None:
         """Apply PRAGMAs every time a new raw connection is opened."""
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -97,16 +95,12 @@ class DecimalAsText(TypeDecorator):  # type: ignore[type-arg]
     impl = Text
     cache_ok = True  # Safe to cache because TEXT is always the same
 
-    def process_bind_param(
-        self, value: Decimal | None, dialect: Any
-    ) -> str | None:
+    def process_bind_param(self, value: Decimal | None, dialect: Any) -> str | None:
         if value is not None:
             return str(value)
         return None
 
-    def process_result_value(
-        self, value: str | None, dialect: Any
-    ) -> Decimal | None:
+    def process_result_value(self, value: str | None, dialect: Any) -> Decimal | None:
         if value is not None:
             return Decimal(value)
         return None

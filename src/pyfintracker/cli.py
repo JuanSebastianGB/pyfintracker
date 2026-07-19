@@ -155,7 +155,7 @@ def config_show() -> None:
     data = {}
     for field in [
         "db_path",
-        "default_currency",
+        "display_currency",
         "account_name_max_length",
         "description_max_length",
         "snapshot_width",
@@ -232,7 +232,8 @@ def account_new(
                 equity = get_account_by_name(conn, "Equity:OpeningBalances")
                 if equity is None:
                     equity = upsert_account(
-                        conn, name="Equity:OpeningBalances",
+                        conn,
+                        name="Equity:OpeningBalances",
                         currency=validated_currency,
                     )
                 assert equity.id is not None
@@ -243,13 +244,19 @@ def account_new(
                     currency=validated_currency,
                 )
                 postings = [
-                    Posting(account_id=account.id, amount=validated_amount, currency=validated_currency),
-                    Posting(account_id=equity.id, amount=-validated_amount, currency=validated_currency),
+                    Posting(
+                        account_id=account.id, amount=validated_amount, currency=validated_currency
+                    ),
+                    Posting(
+                        account_id=equity.id, amount=-validated_amount, currency=validated_currency
+                    ),
                 ]
                 create_transaction_with_postings(conn, txn, postings)
 
                 console = Console()
-                console.print(f"[green]✓[/green] '{canonical}' created with opening balance {validated_amount} {validated_currency}")
+                console.print(
+                    f"[green]✓[/green] '{canonical}' created with opening balance {validated_amount} {validated_currency}"
+                )
                 return
 
             console = Console()
@@ -341,14 +348,17 @@ def add(
                     return acct.id
 
                 txn, postings = repl_add_postings(
-                    console, _stdin_prompt, _resolve, account_names,
+                    console,
+                    _stdin_prompt,
+                    _resolve,
+                    account_names,
                 )
                 txn_id = create_transaction_with_postings(conn, txn, postings)
 
             console.print(f"[green]✓[/green] Transaction #{txn_id}: {txn.description}")
         except FinanceError as e:
             console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=getattr(e, 'code', 1)) from None
+            raise typer.Exit(code=getattr(e, "code", 1)) from None
 
         return
 
@@ -394,7 +404,9 @@ def add(
             assert dst.id is not None
 
             txn = Transaction(
-                date=date.today(), description=description, currency=validated_currency,
+                date=date.today(),
+                description=description,
+                currency=validated_currency,
             )
             postings = [
                 Posting(account_id=src.id, amount=-validated_amount, currency=validated_currency),
@@ -404,7 +416,9 @@ def add(
             txn_id = create_transaction_with_postings(conn, txn, postings)
 
         console = Console()
-        console.print(f"[green]✓[/green] Transaction #{txn_id}: {description} ({validated_amount} {validated_currency})")
+        console.print(
+            f"[green]✓[/green] Transaction #{txn_id}: {description} ({validated_amount} {validated_currency})"
+        )
 
     except (FinanceError, ValueError) as e:
         console = Console()
@@ -412,7 +426,7 @@ def add(
             _render_error(e, console)
         else:
             console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=getattr(e, 'code', 1)) from None
+        raise typer.Exit(code=getattr(e, "code", 1)) from None
 
 
 # ── Report sub-app commands ──────────────────────────────────────────────────
@@ -436,8 +450,11 @@ def report_month(
         year_month = f"{today.year}-{today.month:02d}"
     elif not re.match(r"^\d{4}-\d{2}$", year_month):
         from pyfintracker.exceptions import InvalidDate
+
         console = Console()
-        _render_error(InvalidDate(f"Invalid month format '{year_month}'. Expected YYYY-MM."), console)
+        _render_error(
+            InvalidDate(f"Invalid month format '{year_month}'. Expected YYYY-MM."), console
+        )
         raise typer.Exit(code=1)
 
     engine = _get_engine()
@@ -531,8 +548,7 @@ def repl_add_postings(
 
     if not sys.stdin.isatty():
         raise ReplRequiresTTYError(
-            "REPL requires interactive terminal; "
-            "use --from/--to for non-interactive entry"
+            "REPL requires interactive terminal; use --from/--to for non-interactive entry"
         )
 
     # ── Date ───────────────────────────────────────────────────────────

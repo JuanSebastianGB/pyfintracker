@@ -203,12 +203,16 @@ class TestAccountHasPostings:
 
         # Insert a transaction
         tx_result = connection.execute(
-            text("INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Salary deposit') RETURNING id"),
+            text(
+                "INSERT INTO transactions (date, description) VALUES ('2026-07-17', 'Salary deposit') RETURNING id"
+            ),
         ).scalar()
 
         # Insert a posting for Assets:Checking
         connection.execute(
-            text("INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"),
+            text(
+                "INSERT INTO postings (transaction_id, account_id, amount, currency) VALUES (:tid, :aid, :amt, :cur)"
+            ),
             {"tid": tx_result, "aid": checking_id, "amt": "5000000", "cur": "COP"},
         )
 
