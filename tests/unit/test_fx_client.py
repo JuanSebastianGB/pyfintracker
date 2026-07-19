@@ -174,3 +174,52 @@ class TestListSupportedCurrencies:
         assert len(result) == 12
         expected = {"COP", "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "MXN", "BRL", "INR", "CNY"}
         assert result == expected
+
+
+@pytest.mark.unit
+class TestConvert:
+    """T-C.1: fx.convert — pure arithmetic."""
+
+    def test_convert_usd_to_cop(self) -> None:
+        """convert(100, USD, COP) returns rate * amount quantized to COP precision."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("100"), "USD", "COP", rate=Decimal("3255.56"))
+        assert result == Decimal("325556")  # COP precision = 0
+        assert isinstance(result, Decimal)
+
+    def test_convert_cop_to_usd(self) -> None:
+        """convert(50000, COP, USD) returns rate * amount quantized to USD precision."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("50000"), "COP", "USD", rate=Decimal("0.000307"))
+        # 50000 * 0.000307 = 15.35, quantized to 2 dp = 15.35
+        assert result == Decimal("15.35")
+
+    def test_convert_same_currency_no_rate_needed(self) -> None:
+        """convert(amount, X, X) returns amount quantized to X precision (no rate arg)."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("100.50"), "COP", "COP")
+        assert result == Decimal("101")  # COP precision = 0, ROUND_HALF_UP
+
+    def test_convert_same_currency_usd(self) -> None:
+        """convert(amount, USD, USD) quantizes to 2 dp."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("100.456"), "USD", "USD")
+        assert result == Decimal("100.46")  # ROUND_HALF_UP
+
+    def test_convert_negative_amount(self) -> None:
+        """convert works with negative amounts (debits)."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("-50"), "USD", "COP", rate=Decimal("3255.56"))
+        assert result == Decimal("-162778")  # -50 * 3255.56 = -162778, COP=0dp
+
+    def test_convert_rounds_half_up(self) -> None:
+        """ROUND_HALF_UP: 100 USD roundtrips to same."""
+        from pyfintracker.fx import convert
+
+        result = convert(Decimal("100"), "USD", "USD")
+        assert result == Decimal("100.00")

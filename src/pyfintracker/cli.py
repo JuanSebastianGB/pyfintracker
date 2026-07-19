@@ -89,6 +89,62 @@ def _get_engine() -> Engine:
 
 
 @app.command()
+def convert(
+    amount: str = typer.Argument(..., help="Amount to convert"),
+    from_ccy: str = typer.Argument(..., help="Source currency ISO code"),
+    to_ccy: str = typer.Argument(..., help="Target currency ISO code"),
+    date: str = typer.Option("", "--date", help="Rate date (YYYY-MM-DD, default: latest)"),
+) -> None:
+    """Convert an amount between currencies using live FX rates.
+
+    Examples:\n
+    fin convert 100 USD COP\n
+    fin convert 50000 COP USD --date 2026-07-18
+    """
+    from datetime import date as dt_date
+
+    from pyfintracker.fx import convert as fx_convert
+    from pyfintracker.validation import validate_amount, validate_currency
+
+    console = Console()
+
+    try:
+        validated_from = validate_currency(from_ccy)
+        validated_to = validate_currency(to_ccy)
+        validated_amount = validate_amount(amount, validated_from)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=1) from None
+
+    on: dt_date | None = None
+    if date:
+        from pyfintracker.validation import validate_date
+
+        try:
+            on = validate_date(date)
+        except FinanceError as e:
+            _render_error(e, console)
+            raise typer.Exit(code=1) from None
+
+    try:
+        result = fx_convert(validated_amount, validated_from, validated_to, on=on)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+    # Fetch the rate for display
+    from pyfintracker.fx import get_rate
+
+    try:
+        rate_info = get_rate(validated_from, validated_to, on=on)
+        rate_str = f"{rate_info.rate} ({rate_info.date}, {rate_info.source})"
+    except FinanceError:
+        rate_str = "unknown"
+
+    console.print(f"{validated_amount} {validated_from} = {result} {validated_to} (rate {rate_str})")
+
+
+@app.command()
 def version() -> None:
     """Show the installed version."""
     typer.echo(f"pyfintracker v{__version__}")
