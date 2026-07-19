@@ -89,6 +89,62 @@ def _get_engine() -> Engine:
 
 
 @app.command()
+def convert(
+    amount: str = typer.Argument(..., help="Amount to convert"),
+    from_ccy: str = typer.Argument(..., help="Source currency ISO code"),
+    to_ccy: str = typer.Argument(..., help="Target currency ISO code"),
+    date: str = typer.Option("", "--date", help="Rate date (YYYY-MM-DD, default: latest)"),
+) -> None:
+    """Convert an amount between currencies using live FX rates.
+
+    Examples:\n
+    fin convert 100 USD COP\n
+    fin convert 50000 COP USD --date 2026-07-18
+    """
+    from datetime import date as dt_date
+
+    from pyfintracker.fx import convert as fx_convert
+    from pyfintracker.validation import validate_amount, validate_currency
+
+    console = Console()
+
+    try:
+        validated_from = validate_currency(from_ccy)
+        validated_to = validate_currency(to_ccy)
+        validated_amount = validate_amount(amount, validated_from)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=1) from None
+
+    on: dt_date | None = None
+    if date:
+        from pyfintracker.validation import validate_date
+
+        try:
+            on = validate_date(date)
+        except FinanceError as e:
+            _render_error(e, console)
+            raise typer.Exit(code=1) from None
+
+    try:
+        result = fx_convert(validated_amount, validated_from, validated_to, on=on)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+    # Fetch the rate for display
+    from pyfintracker.fx import get_rate
+
+    try:
+        rate_info = get_rate(validated_from, validated_to, on=on)
+        rate_str = f"{rate_info.rate} ({rate_info.date}, {rate_info.source})"
+    except FinanceError:
+        rate_str = "unknown"
+
+    console.print(f"{validated_amount} {validated_from} = {result} {validated_to} (rate {rate_str})")
+
+
+@app.command()
 def version() -> None:
     """Show the installed version."""
     typer.echo(f"pyfintracker v{__version__}")
@@ -432,17 +488,41 @@ def add(
 # ── Report sub-app commands ──────────────────────────────────────────────────
 
 
+def _resolve_display_currency(currency: str | None) -> str:
+    """Resolve the display currency from CLI --currency flag, config, or default.
+
+    Validates the currency before returning.
+    """
+    from pyfintracker.config import load_settings
+    from pyfintracker.validation import validate_currency
+
+    if currency:
+        return validate_currency(currency)
+
+    # Fall back to config display_currency
+    settings = load_settings()
+    dsp = settings.display_currency or "COP"
+    return validate_currency(dsp)
+
+
 @report_app.command("month")
 def report_month(
     month: str = typer.Option("", "--month", help="Month in YYYY-MM format (default: current)"),
+    currency: str | None = typer.Option(None, "--currency", help="Display currency ISO code"),
 ) -> None:
     """Show income/expense report for a month."""
     import re
     from datetime import date
 
-    from rich.console import Console
-
+    from pyfintracker.exceptions import FinanceError
     from pyfintracker.reports import compute_monthly_report, render_monthly_report
+
+    # Validate currency FIRST (D7) — before any DB query
+    try:
+        validated_currency = _resolve_display_currency(currency)
+    except FinanceError as e:
+        Console().print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
 
     year_month = month
     if not year_month:
@@ -460,23 +540,31 @@ def report_month(
     engine = _get_engine()
     console = Console()
     with engine.begin() as conn:
-        report = compute_monthly_report(conn, year_month)
+        report = compute_monthly_report(conn, year_month, display_currency=validated_currency)
     render_monthly_report(report, console)
 
 
 @report_app.command("balance")
 def balance(
     account_name: str = typer.Argument(None, help="Filter by account name (optional)"),
+    currency: str | None = typer.Option(None, "--currency", help="Display currency ISO code"),
 ) -> None:
     """Show account balances and net worth."""
-    from rich.console import Console
+    from pyfintracker.exceptions import FinanceError
+
+    # Validate currency FIRST (D7) — before any DB query
+    try:
+        validated_currency = _resolve_display_currency(currency)
+    except FinanceError as e:
+        Console().print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
 
     from pyfintracker.reports import compute_balance, render_balance
 
     engine = _get_engine()
     console = Console()
     with engine.begin() as conn:
-        report = compute_balance(conn)
+        report = compute_balance(conn, display_currency=validated_currency)
 
     if account_name:
         lower = account_name.lower()

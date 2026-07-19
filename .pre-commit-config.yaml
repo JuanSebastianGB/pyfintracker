@@ -10,10 +10,37 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      - id: no-raw-currency-sum
+        name: no-raw-currency-sum
+        description: "Ensure reports.py does not add raw posting amounts across currencies"
+        entry: uv run pytest tests/unit/test_no_raw_currency_sum.py -x --no-header -q --no-cov
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: money-columns-are-text
         name: money-columns-are-text
         description: "Ensure money columns use TEXT type in schema"
         entry: uv run pytest tests/unit/test_money_columns_text.py -x --no-header -q --no-cov
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: ruff-check
+        name: ruff
+        description: "Run ruff linter"
+        entry: uv run ruff check src/ tests/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: mypy-strict
+        name: mypy
+        description: "Run mypy --strict on src/"
+        entry: uv run mypy src/
         language: system
         pass_filenames: false
         always_run: true

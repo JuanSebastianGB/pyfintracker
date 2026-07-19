@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -34,6 +35,7 @@ class MonthlyReport(BaseModel):
     income_total: Decimal
     expense_total: Decimal
     net: Decimal
+    currency: str = "COP"
 
 
 class BalanceLine(BaseModel):
@@ -53,6 +55,7 @@ class BalanceReport(BaseModel):
 
     lines: list[BalanceLine]
     net_worth: Decimal
+    currency: str = "COP"
 
 
 def _to_lines(entries: list[dict[str, Any]]) -> list[MonthlyLine]:
@@ -86,12 +89,37 @@ def _to_lines(entries: list[dict[str, Any]]) -> list[MonthlyLine]:
     return lines
 
 
-def compute_monthly_report(conn: Connection, year_month: str) -> MonthlyReport:
+def _convert_amount(
+    amount: Decimal,
+    from_ccy: str,
+    to_ccy: str,
+    on: date,
+    conn: Connection | None = None,
+) -> Decimal:
+    """Convert a single posting amount to target display currency.
+
+    Same-currency is a fast-path (no I/O).  Otherwise delegates to fx.convert().
+    """
+    if from_ccy == to_ccy:
+        return amount
+
+    from pyfintracker.fx import convert as fx_convert
+
+    return fx_convert(amount, from_ccy, to_ccy, on=on, _conn=conn)
+
+
+def compute_monthly_report(
+    conn: Connection,
+    year_month: str,
+    *,
+    display_currency: str = "COP",
+) -> MonthlyReport:
     """Compute a monthly income/expense report for the given ``year_month``.
 
     Args:
         conn: SQLAlchemy connection.
         year_month: ISO ``"YYYY-MM"`` format string.
+        display_currency: Target currency for all amounts (default: COP).
 
     Returns:
         A ``MonthlyReport`` with income/expense lines, totals, and net.
@@ -123,6 +151,19 @@ def compute_monthly_report(conn: Connection, year_month: str) -> MonthlyReport:
         {"year": str(year), "month": f"{month:02d}"},
     ).fetchall()
 
+    # Pre-fetch all distinct rate pairs if cross-currency
+    needs_conversion = any(row.currency != display_currency for row in rows)
+    if needs_conversion:
+        pairs: set[tuple[str, str, date]] = set()
+        for row in rows:
+            posting_ccy: str = row.currency
+            if posting_ccy != display_currency:
+                txn_date = date.fromisoformat(row.date)
+                pairs.add((posting_ccy, display_currency, txn_date))
+        if pairs:
+            for from_ccy, to_ccy, d in pairs:
+                _convert_amount(Decimal("1"), from_ccy, to_ccy, d, conn=conn)
+
     income_entries: list[dict[str, Any]] = []
     expense_entries: list[dict[str, Any]] = []
 
@@ -132,6 +173,12 @@ def compute_monthly_report(conn: Connection, year_month: str) -> MonthlyReport:
         amount_str: str = row.amount
         amount = Decimal(amount_str)
         label: str = row.name
+        posting_ccy = row.currency
+
+        # Convert to display currency if needed
+        if posting_ccy != display_currency:
+            txn_date = date.fromisoformat(row.date)
+            amount = _convert_amount(amount, posting_ccy, display_currency, txn_date, conn=conn)
 
         if kind == "Income":
             # Income postings are credits (negative) — negate for positive income
@@ -153,25 +200,36 @@ def compute_monthly_report(conn: Connection, year_month: str) -> MonthlyReport:
         income_total=income_total,
         expense_total=expense_total,
         net=income_total - expense_total,
+        currency=display_currency,
     )
 
 
-def compute_balance(conn: Connection) -> BalanceReport:
+def compute_balance(
+    conn: Connection,
+    *,
+    display_currency: str = "COP",
+    as_of: date | None = None,
+) -> BalanceReport:
     """Compute per-account balances and net worth.
 
     Assets, Liabilities, and Equity accounts are included with positive sign
     convention (positive means you have it). Income and Expenses accounts are
     excluded (P&L, reset each period). Zero-balance accounts are omitted.
 
+    When ``display_currency`` differs from a posting's native currency, the
+    posting is converted at its transaction date (NOT the ``as_of`` date).
+
     Args:
         conn: SQLAlchemy connection.
+        display_currency: Target currency for all amounts (default: COP).
+        as_of: If provided, only considers postings on or before this date.
 
     Returns:
         A ``BalanceReport`` with per-account lines and net worth.
     """
-    rows = conn.execute(
+    account_rows = conn.execute(
         text("""
-            SELECT a.id, a.name, a.kind, COALESCE(SUM(p.amount), '0') as balance
+            SELECT a.id, a.name, a.kind, a.currency, COALESCE(SUM(p.amount), '0') as balance
             FROM accounts a
             LEFT JOIN postings p ON a.id = p.account_id
             GROUP BY a.id
@@ -179,20 +237,85 @@ def compute_balance(conn: Connection) -> BalanceReport:
         """),
     ).fetchall()
 
-    lines: list[BalanceLine] = []
-    for row in rows:
-        if row.kind in ("Income", "Expenses"):
+    # For balance we aggregate per account — need per-posting detail for conversion.
+    # If cross-currency, query individual postings instead.
+    if display_currency != "COP" or as_of is not None:
+        posting_query = text("""
+            SELECT a.name, a.kind, p.currency as posting_ccy, p.amount, t.date
+            FROM postings p
+            JOIN accounts a ON p.account_id = a.id
+            JOIN transactions t ON p.transaction_id = t.id
+            WHERE a.kind NOT IN ('Income', 'Expenses')
+            ORDER BY a.name
+        """)
+        if as_of is not None:
+            posting_query = text("""
+                SELECT a.name, a.kind, p.currency as posting_ccy, p.amount, t.date
+                FROM postings p
+                JOIN accounts a ON p.account_id = a.id
+                JOIN transactions t ON p.transaction_id = t.id
+                WHERE a.kind NOT IN ('Income', 'Expenses')
+                  AND t.date <= :as_of
+                ORDER BY a.name
+            """)
+
+        rows = conn.execute(posting_query, {"as_of": str(as_of)} if as_of is not None else {}).fetchall()
+
+        # Pre-fetch rates if cross-currency
+        if display_currency != "COP":
+            pairs: set[tuple[str, str, date]] = set()
+            for row in rows:
+                txn_date = date.fromisoformat(row.date)
+                if row.posting_ccy != display_currency:
+                    pairs.add((row.posting_ccy, display_currency, txn_date))
+            if pairs:
+                for from_ccy, to_ccy, d in pairs:
+                    _convert_amount(Decimal("1"), from_ccy, to_ccy, d, conn=conn)
+
+        # Aggregate per account with conversion
+        acct_balances: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            name: str = row.name
+            amount = Decimal(row.amount)
+            txn_date = date.fromisoformat(row.date)
+            posting_ccy: str = row.posting_ccy
+
+            if posting_ccy != display_currency:
+                amount = _convert_amount(amount, posting_ccy, display_currency, txn_date, conn=conn)
+
+            if name not in acct_balances:
+                acct_balances[name] = {"kind": row.kind, "balance": Decimal("0")}
+
+            if row.kind in ("Liabilities", "Equity"):
+                acct_balances[name]["balance"] -= amount
+            else:
+                acct_balances[name]["balance"] += amount
+
+        lines = [
+            BalanceLine(account_name=name, account_kind=data["kind"], balance=data["balance"])
+            for name, data in acct_balances.items()
+            if data["balance"] != Decimal("0")
+        ]
+        lines.sort(key=lambda ln: ln.account_name)
+
+        net_worth = sum((line.balance for line in lines), Decimal("0"))
+        return BalanceReport(lines=lines, net_worth=net_worth, currency=display_currency)
+
+    # Same-currency fast path (COP-only, no as_of) — original aggregated query
+    lines: list[BalanceLine] = []  # type: ignore[no-redef]
+    for row in account_rows:
+        kind: str = row.kind
+
+        if kind in ("Income", "Expenses"):
             continue  # P&L accounts excluded from balance
 
         balance = Decimal(row.balance) if row.balance else Decimal("0")
 
-        # Liability and Equity accounts have credit balances (negative postings)
-        # Negate to show positive (positive = you have it)
-        if row.kind in ("Liabilities", "Equity"):
+        if kind in ("Liabilities", "Equity"):
             balance = -balance
 
         if balance == Decimal("0"):
-            continue  # skip zero-balance accounts
+            continue
 
         lines.append(
             BalanceLine(
@@ -203,8 +326,7 @@ def compute_balance(conn: Connection) -> BalanceReport:
         )
 
     net_worth = sum((line.balance for line in lines), Decimal("0"))
-
-    return BalanceReport(lines=lines, net_worth=net_worth)
+    return BalanceReport(lines=lines, net_worth=net_worth, currency=display_currency)
 
 
 # ── Render functions ───────────────────────────────────────────────────────
@@ -239,7 +361,10 @@ def render_monthly_report(report: MonthlyReport, console: Console) -> None:
         console: Rich console to print to.
     """
     # ── Title ───────────────────────────────────────────────────────────
-    console.print(Panel(f"Monthly Report — {report.year_month}"))
+    title = f"Monthly Report — {report.year_month}"
+    if report.currency != "COP":
+        title += f" ({report.currency})"
+    console.print(Panel(title))
 
     # ── Helper to render one section ────────────────────────────────────
     def _render_section(title: str, lines: list[MonthlyLine], total: Decimal) -> None:
@@ -276,7 +401,8 @@ def render_monthly_report(report: MonthlyReport, console: Console) -> None:
 
     # ── Net summary ─────────────────────────────────────────────────────
     net_color = "green" if report.net >= 0 else "red"
-    console.print(f"\n[bold]Net: [{net_color}]{_fmt(report.net)}[/{net_color}][/bold]")
+    ccy_tag = f" {report.currency}" if report.currency != "COP" else ""
+    console.print(f"\n[bold]Net: [{net_color}]{_fmt(report.net)}[/{net_color}]{ccy_tag}[/bold]")
 
 
 def render_balance(report: BalanceReport, console: Console) -> None:
@@ -312,7 +438,8 @@ def render_balance(report: BalanceReport, console: Console) -> None:
 
     # ── Net worth footer ────────────────────────────────────────────────
     nw_color = "green" if report.net_worth >= 0 else "red"
-    console.print(f"[bold]Net worth: [{nw_color}]{_fmt(report.net_worth)}[/{nw_color}][/bold]")
+    ccy_tag = f" {report.currency}" if report.currency != "COP" else ""
+    console.print(f"[bold]Net worth: [{nw_color}]{_fmt(report.net_worth)}[/{nw_color}]{ccy_tag}[/bold]")
 
 
 __all__ = [

@@ -213,7 +213,8 @@ def get_rate(
     today = date.today()
 
     # ── helpers ───────────────────────────────────────────────────────────_
-    def _rate_age(cached_rate: Rate) -> float | None:
+    # ponytail: return as int seconds — float stays out of the money pipeline
+    def _rate_age(cached_rate: Rate) -> int | None:
         """Return age in seconds, handling naive/aware datetime mismatch."""
         ft = cached_rate.fetched_at
         if ft is None:
@@ -221,7 +222,7 @@ def get_rate(
         # SQLite stores naive UTC — treat as UTC if no tz
         if ft.tzinfo is None:
             ft = ft.replace(tzinfo=UTC)
-        return (now - ft).total_seconds()
+        return int((now - ft).total_seconds())
 
     # --- 1. Same-currency identity ---
     if from_ccy == to_ccy:
@@ -285,6 +286,51 @@ def get_rate(
     return fresh
 
 
+def convert(
+    amount: Decimal,
+    from_ccy: str,
+    to_ccy: str,
+    *,
+    on: date | None = None,
+    rate: Decimal | None = None,
+    _client: FrankfurterClient | None = None,
+    _conn: Connection | None = None,
+) -> Decimal:
+    """Convert an amount from one currency to another.
+
+    Same-currency fast-path (no I/O). Cross-currency calls ``get_rate``
+    (which may hit cache or Frankfurter), multiplies, quantizes to target
+    precision via ``ROUND_HALF_UP``.
+
+    Args:
+        amount: Decimal amount to convert.
+        from_ccy: Source currency ISO code.
+        to_ccy: Target currency ISO code.
+        on: Effective date (None = latest).
+        rate: Pre-resolved rate (for testing — bypasses get_rate).
+        _client: Injected FrankfurterClient (for testing).
+        _conn: Injected DB connection (for testing).
+
+    Returns:
+        Decimal amount in ``to_ccy``, quantized to per-currency precision.
+    """
+    from pyfintracker.validation import quantize_for_currency
+
+    # Same-currency fast path — no rate needed
+    if from_ccy == to_ccy:
+        return quantize_for_currency(amount, to_ccy)
+
+    # Use explicit rate (for testing) or fetch via get_rate
+    if rate is None:
+        r = get_rate(from_ccy, to_ccy, on=on, _client=_client, _conn=_conn)
+        rate_val = r.rate
+    else:
+        rate_val = rate
+
+    converted = amount * rate_val
+    return quantize_for_currency(converted, to_ccy)
+
+
 def _warn_stale(cached: Rate) -> None:
     """Emit a stderr warning about using a stale cached rate."""
     ts = cached.fetched_at
@@ -295,6 +341,7 @@ def _warn_stale(cached: Rate) -> None:
 __all__ = [
     "DEFAULT_TIMEOUT",
     "FrankfurterClient",
+    "convert",
     "get_rate",
     "list_supported_currencies",
 ]
