@@ -164,16 +164,38 @@ class Rate:
         return d
 
     @staticmethod
-    def from_row(row: Mapping[str, Any]) -> Rate:
-        """Reconstruct from a SQLAlchemy result row."""
+    def from_row(row: Any) -> Rate:
+        """Reconstruct from a SQLAlchemy result row.
+
+        Coerces SQLite TEXT columns (date, fetched_at, rate) to their Python
+        types. Accepts a Row, RowMapping, or plain ``dict`` (e.g. from tests).
+        """
+        from datetime import date as _date
+        from datetime import datetime as _datetime
+        from decimal import Decimal as _Decimal
+
+        data: dict[str, Any] = dict(getattr(row, "_mapping", row))
+
+        raw_date = data["date"]
+        if isinstance(raw_date, str):
+            data["date"] = _date.fromisoformat(raw_date)
+
+        raw_fetched = data.get("fetched_at")
+        if isinstance(raw_fetched, str):
+            data["fetched_at"] = _datetime.fromisoformat(raw_fetched)
+
+        raw_rate = data["rate"]
+        if isinstance(raw_rate, str):
+            data["rate"] = _Decimal(raw_rate)
+
         return Rate(
-            id=row.get("id"),
-            date=row["date"],
-            from_ccy=row["base_currency"],
-            to_ccy=row["target_currency"],
-            rate=row["rate"],
-            fetched_at=row.get("fetched_at"),
-            source=row.get("source", "frankfurter"),
+            id=data.get("id"),
+            date=data["date"],
+            from_ccy=data["base_currency"],
+            to_ccy=data["target_currency"],
+            rate=data["rate"],
+            fetched_at=data.get("fetched_at"),
+            source=data.get("source", "frankfurter"),
         )
 
 

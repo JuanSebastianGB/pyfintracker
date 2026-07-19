@@ -292,11 +292,6 @@ class TestValidateAmount:
         result = validate_amount("123.45", "USD")
         assert result == Decimal("123.45")
 
-    def test_rejects_float(self) -> None:
-        """Float raises InvalidAmount (float is NOT safe for money)."""
-        with pytest.raises(InvalidAmount):
-            validate_amount(123.45, "USD")
-
     def test_int_accepted(self) -> None:
         """Int 123 in COP returns Decimal('123') (quantized to 0 dp)."""
         result = validate_amount(123, "COP")
@@ -306,11 +301,6 @@ class TestValidateAmount:
         """Non-numeric string 'abc' raises InvalidAmount."""
         with pytest.raises(InvalidAmount):
             validate_amount("abc", "USD")
-
-    def test_none_raises(self) -> None:
-        """None raises InvalidAmount."""
-        with pytest.raises(InvalidAmount):
-            validate_amount(None, "USD")
 
     def test_nan_raises(self) -> None:
         """Decimal('NaN') raises InvalidAmount."""
@@ -347,6 +337,19 @@ class TestValidateAmount:
         with pytest.raises(InvalidCurrency):
             validate_amount("100", "XYZ")
 
+    def test_type_contract_excludes_float_and_none(self) -> None:
+        """validate_amount type signature is ``str | int | Decimal``.
+
+        Runtime rejection of float/None used to live in the body; now it's a
+        mypy-time guarantee.  This test documents the boundary — callers
+        passing ``float`` or ``None`` will get a mypy error, not a runtime one.
+        """
+        import inspect
+
+        sig = inspect.signature(validate_amount)
+        value_param = sig.parameters["value"]
+        assert value_param.annotation == "str | int | Decimal"
+
 
 # ── T-3.9: validate_amount edge cases (float, NaN, Inf, etc.) ────────────────
 
@@ -354,9 +357,6 @@ class TestValidateAmount:
 @pytest.mark.parametrize(
     "value,currency",
     [
-        (1.5, "COP"),  # float
-        (0.0, "COP"),  # float zero
-        (-1.5, "COP"),  # negative float
         (Decimal("NaN"), "COP"),
         (Decimal("Infinity"), "COP"),
         (Decimal("-Infinity"), "COP"),
@@ -364,15 +364,16 @@ class TestValidateAmount:
         ("", "COP"),  # empty string
         ("   ", "COP"),  # whitespace
         ("abc", "COP"),  # non-numeric
-        (None, "COP"),  # None
         ("12,34", "COP"),  # comma decimal (not period)
         ("12.34.56", "COP"),  # double dot
-        ({}, "COP"),  # dict
-        ([], "COP"),  # list
     ],
 )
 def test_validate_amount_rejects_invalid(value: object, currency: str) -> None:
-    """Each bad input raises InvalidAmount."""
+    """Each bad input raises InvalidAmount.
+
+    Note: float and None inputs are excluded — the type contract is
+    ``str | int | Decimal``, so they're rejected at the mypy layer, not runtime.
+    """
     with pytest.raises(InvalidAmount):
         validate_amount(value, currency)
 

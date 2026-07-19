@@ -344,8 +344,8 @@ class TestReplResolve:
 
         account_ids = {"Expenses:Food": 1, "Assets:Cash": 2}
 
-        def resolve(name: str) -> int:
-            return account_ids[name]
+        def resolve(name: str) -> int | None:
+            return account_ids.get(name)
 
         _txn, postings = repl_add_postings(console, lambda *a, **kw: next(replies), resolve)
         assert len(postings) == 2
@@ -355,27 +355,25 @@ class TestReplResolve:
     def test_retries_on_unknown(self) -> None:
         """Unknown account retries after error."""
         from pyfintracker.cli import repl_add_postings
-        from pyfintracker.exceptions import AccountNotFoundError
 
         console = MagicMock()
         call_count = [0]
         account_ids = {"Expenses:Food": 1, "Assets:Cash": 2}
 
-        def resolve(name: str) -> int:
-            if name == "Expenses:Nope":
-                raise AccountNotFoundError(f"Account '{name}' not found")
-            return account_ids[name]
+        def resolve(name: str) -> int | None:
+            return account_ids.get(name)
 
-        # REPL prompts: Account → Amount → (error on unknown account → continue) → Account → Amount...
-        # So after "Expenses:Nope" (Account), we still need a valid Amount ("50000")
-        # before the retry picks up the next Account ("Expenses:Food")
+        # REPL prompts: Account → Amount → (resolve returns None → continue)
+        # → Account → Amount...
+        # So after "Expenses:Nope" (Account), we still need a valid Amount
+        # before the retry picks up the next Account.
         def prompt_fn(text: str, default: str = "") -> str:
             call_count[0] += 1
             responses = {
                 1: "2024-01-15",
                 2: "Test",
                 3: "COP",
-                4: "Expenses:Nope",  # Account → unknown, error triggers on resolve
+                4: "Expenses:Nope",  # Account → unknown
                 5: "50000",  # Amount (still collected before resolve happens)
                 6: "Expenses:Food",  # Account → known (retry)
                 7: "50000",  # Amount

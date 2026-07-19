@@ -16,6 +16,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from pyfintracker.validation import PER_CURRENCY_DECIMALS
+
 # revision identifiers, used by Alembic.
 revision: str = "0002"
 down_revision: str | Sequence[str] | None = "0001"
@@ -84,7 +86,7 @@ def _remove_rates_fetched_at() -> None:
 # ── Widen accounts.currency CHECK (SQLite recreate-table dance) ────────────────
 
 
-ALLOWED_CURRENCIES_12 = "'COP','USD','EUR','GBP','JPY','CAD','AUD','CHF','MXN','BRL','INR','CNY'"
+ALLOWED_CURRENCIES_12 = ",".join(f"'{c}'" for c in PER_CURRENCY_DECIMALS)
 ALLOWED_CURRENCIES_5 = "'COP','USD','EUR','GBP','JPY'"
 
 

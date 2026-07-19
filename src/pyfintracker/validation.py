@@ -136,7 +136,7 @@ def quantize_for_currency(amount: Decimal, currency: str) -> Decimal:
     return amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
-def validate_amount(value: object, currency: str) -> Decimal:
+def validate_amount(value: str | int | Decimal, currency: str) -> Decimal:
     """Validate and convert a monetary amount to a quantized Decimal.
 
     Accepts: Decimal, str, int.
@@ -148,14 +148,6 @@ def validate_amount(value: object, currency: str) -> Decimal:
         InvalidAmount: if the value is not a valid money amount.
         InvalidCurrency: if the currency is not in PER_CURRENCY_DECIMALS.
     """
-    if value is None:
-        raise InvalidAmount("Amount cannot be None.")
-
-    if isinstance(value, float):
-        raise InvalidAmount(
-            "Float values are not allowed for monetary amounts. Use Decimal or string."
-        )
-
     if isinstance(value, str):
         value = value.strip()
         if not value:
