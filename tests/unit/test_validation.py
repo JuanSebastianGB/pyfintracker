@@ -162,6 +162,11 @@ class TestValidateDate:
         result = validate_date(d)
         assert result is d
 
+    def test_invalid_non_string(self) -> None:
+        """Values outside the str/date contract raise InvalidDate."""
+        with pytest.raises(InvalidDate):
+            validate_date(123)  # type: ignore[arg-type]
+
     def test_invalid_empty_string(self) -> None:
         """Empty string raises InvalidDate."""
         with pytest.raises(InvalidDate):
@@ -527,6 +532,10 @@ class TestValidateTransaction:
 @pytest.mark.unit
 class TestValidateDescription:
     """T-4.5: validate_description(desc) -> str."""
+
+    def test_max_length_allowed(self) -> None:
+        value = "a" * 256
+        assert validate_description(value) == value
 
     def test_too_long(self) -> None:
         with pytest.raises(InvalidDescription):

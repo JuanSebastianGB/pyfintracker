@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import FxUnavailableError, RateNotFoundError
-from pyfintracker.fx import FrankfurterClient, get_rate
+from pyfintracker.fx import FrankfurterClient, convert, get_rate
 from pyfintracker.models import Rate
 from pyfintracker.repository import get_cached_rate, upsert_rate
 
@@ -41,6 +41,7 @@ class TestSameCurrencyAndCacheHit:
         assert rate.rate == Decimal("1")
         assert rate.from_ccy == "USD"
         assert rate.to_ccy == "USD"
+        assert rate.source == "identity"
         assert len(transport_calls) == 0
 
     def test_get_rate_cache_hit_uses_stored_row(self, session: Connection) -> None:
@@ -67,21 +68,79 @@ class TestInverseLookup:
     """T-B.7: inverse lookup — 1/rate quantized to source precision."""
 
     def test_get_rate_inverse_lookup(self, session: Connection) -> None:
-        """Inverse rate is 1/direct quantized to from_ccy precision."""
+        """Inverse rate uses ROUND_HALF_UP at the source-currency precision."""
         upsert_rate(
             session,
-            Rate(date=date.today(), from_ccy="COP", to_ccy="USD", rate=Decimal("0.000307")),
+            Rate(date=date.today(), from_ccy="COP", to_ccy="USD", rate=Decimal("8")),
         )
 
+        rate = get_rate("USD", "COP", on=date.today(), _conn=session)
+
+        assert rate.rate == Decimal("0.13")
+        assert rate.from_ccy == "USD"
+        assert rate.to_ccy == "COP"
+
+    def test_inverse_rate_below_one_is_used(self, session: Connection) -> None:
+        """Any positive inverse rate is valid, including values below one."""
+        upsert_rate(
+            session,
+            Rate(date=date.today(), from_ccy="COP", to_ccy="USD", rate=Decimal("0.5")),
+        )
+        transport_calls: list[str] = []
+
         def handler(req: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=_rate_json(str(date.today()), "USD", "COP", 3257.0))
+            transport_calls.append(str(req.url))
+            return httpx.Response(
+                200,
+                json=_rate_json(str(date.today()), "USD", "COP", 999),
+            )
 
         client = FrankfurterClient(transport=httpx.MockTransport(handler))
         rate = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
-        # 1 / 0.000307 ≈ 3257.328... → quantized to from_ccy (USD) precision (2) = 3257.33
-        assert rate.rate == Decimal("3257.33")
-        assert rate.from_ccy == "USD"
-        assert rate.to_ccy == "COP"
+
+        assert rate.rate == Decimal("2.00")
+        assert len(transport_calls) == 0
+
+    def test_inverse_lookup_preserves_metadata(self, session: Connection) -> None:
+        """An inverted cached rate keeps the source and fetched timestamp."""
+        fetched_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+        upsert_rate(
+            session,
+            Rate(
+                date=date.today(),
+                from_ccy="COP",
+                to_ccy="USD",
+                rate=Decimal("2"),
+                source="manual",
+                fetched_at=fetched_at,
+            ),
+        )
+
+        rate = get_rate("USD", "COP", on=date.today(), _conn=session)
+
+        assert rate.source == "manual"
+        assert rate.fetched_at == fetched_at
+
+    def test_zero_inverse_rate_is_ignored(self, session: Connection) -> None:
+        """A zero inverse cache row is ignored instead of being divided."""
+        upsert_rate(
+            session,
+            Rate(date=date.today(), from_ccy="COP", to_ccy="USD", rate=Decimal("0")),
+        )
+        transport_calls: list[str] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            transport_calls.append(str(req.url))
+            return httpx.Response(
+                200,
+                json=_rate_json(str(date.today()), "USD", "COP", 2.5),
+            )
+
+        client = FrankfurterClient(transport=httpx.MockTransport(handler))
+        rate = get_rate("USD", "COP", on=date.today(), _client=client, _conn=session)
+
+        assert rate.rate == Decimal("2.5")
+        assert len(transport_calls) == 1
 
 
 @pytest.mark.integration
@@ -110,6 +169,32 @@ class TestCacheMissFetch:
         assert cached is not None
         assert cached.rate == Decimal("3255.56")
 
+    def test_convert_uses_injected_client(
+        self,
+        session: Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """convert forwards its injected client instead of constructing a default one."""
+        transport_calls: list[str] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            transport_calls.append(str(req.url))
+            return httpx.Response(
+                200,
+                json=_rate_json(str(date.today()), "USD", "COP", 2.5),
+            )
+
+        client = FrankfurterClient(transport=httpx.MockTransport(handler))
+        monkeypatch.setattr(
+            "pyfintracker.fx.FrankfurterClient",
+            lambda: pytest.fail("convert ignored its injected client"),
+        )
+
+        result = convert(Decimal("2"), "USD", "COP", _client=client, _conn=session)
+
+        assert result == Decimal("5")
+        assert len(transport_calls) == 1
+
     def test_get_rate_miss_transport_down(self, session: Connection) -> None:
         """Cache miss + transport down propagates FxUnavailableError."""
         def handler(req: httpx.Request) -> httpx.Response:
@@ -135,6 +220,63 @@ class TestTTL:
             text("UPDATE rates SET fetched_at = :ts WHERE base_currency='USD' AND target_currency='COP'"),
             {"ts": ts.isoformat()},
         )
+
+    def test_naive_cache_timestamp_is_treated_as_utc(self, session: Connection) -> None:
+        """SQLite's naive default timestamp is reusable as a fresh UTC rate."""
+        upsert_rate(
+            session,
+            Rate(date=date.today(), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56")),
+        )
+        transport_calls: list[str] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            transport_calls.append(str(req.url))
+            return httpx.Response(200, json=_rate_json(str(date.today()), "USD", "COP", 3300.0))
+
+        client = FrankfurterClient(transport=httpx.MockTransport(handler))
+        rate = get_rate("USD", "COP", _client=client, _conn=session)
+
+        assert rate.rate == Decimal("3255.56")
+        assert len(transport_calls) == 0
+
+    def test_exactly_24h_old_cache_is_refreshed(
+        self,
+        session: Connection,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TTL is exclusive: a rate exactly 24h old must be refreshed."""
+        fixed_now = datetime.now(UTC).replace(microsecond=0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now if tz is not None else fixed_now.replace(tzinfo=None)
+
+        upsert_rate(
+            session,
+            Rate(
+                date=date.today(),
+                from_ccy="USD",
+                to_ccy="COP",
+                rate=Decimal("3255.56"),
+                fetched_at=fixed_now - timedelta(hours=24),
+            ),
+        )
+        transport_calls: list[str] = []
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            transport_calls.append(str(req.url))
+            return httpx.Response(
+                200,
+                json=_rate_json(str(date.today()), "USD", "COP", 3300.0),
+            )
+
+        monkeypatch.setattr("pyfintracker.fx.datetime", FixedDateTime)
+        client = FrankfurterClient(transport=httpx.MockTransport(handler))
+        rate = get_rate("USD", "COP", _client=client, _conn=session)
+
+        assert rate.rate == Decimal("3300.00")
+        assert len(transport_calls) == 1
 
     def test_get_rate_23h_old_cache_reused(self, session: Connection) -> None:
         """Cache < 24h old is reused (0 transport calls)."""

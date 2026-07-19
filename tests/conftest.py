@@ -10,7 +10,13 @@ from collections.abc import Generator
 import pytest
 from alembic.command import upgrade
 from alembic.config import Config
+from hypothesis import HealthCheck, settings
 from sqlalchemy import Connection, Engine
+
+settings.register_profile(
+    "mutmut",
+    suppress_health_check=[HealthCheck.differing_executors],
+)
 
 
 @pytest.fixture(scope="function")
