@@ -22,3 +22,9 @@ updates:
       actions-minor-and-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    # ponytail: codeql-action v3 → v4 changed the SARIF summary config format
+    # ponytail: (`category` field); v3 workflows don't run against v4 analyze.
+    # ponytail: Skip major bumps here; land v4 together with the workflow-config fix.
+    ignore:
+      - dependency-name: "github/codeql-action"
+        update-types: ["version-update:semver-major"]
