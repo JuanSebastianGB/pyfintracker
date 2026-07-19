@@ -276,3 +276,113 @@ class TestMigrationSmoke:
         with engine.connect() as conn:
             count = conn.execute(text("SELECT count(*) FROM accounts")).scalar()
             assert count == 11, f"Expected 11 accounts after re-upgrade, got {count}"
+
+
+# ── T-A.5: 0002_multi_currency_schema.py — transactions.currency + rates.fetched_at + accounts CHECK widen ──
+
+
+def _apply_0002(conn: Connection) -> None:
+    """Apply 0002 migration on top of 0001 head."""
+    cfg = _make_config(conn)
+    upgrade(cfg, "0002")
+
+
+def _downgrade_0001(conn: Connection) -> None:
+    """Downgrade from 0002 back to 0001."""
+    cfg = _make_config(conn)
+    downgrade(cfg, "0001")
+
+
+def _column_names(conn: Connection, table: str) -> list[str]:
+    """Return list of column names for a table."""
+    return [
+        row[1]
+        for row in conn.execute(
+            text(f"PRAGMA table_info({table})")
+        ).fetchall()
+    ]
+
+
+@pytest.mark.integration
+class TestMigration0002:
+    """0002 migration: transactions.currency, rates.fetched_at, accounts CHECK."""
+
+    def test_migration_0002_roundtrip(self) -> None:
+        """upgrade→downgrade→upgrade idempotent for 0002."""
+        engine = create_engine("sqlite://", poolclass=StaticPool)
+        with engine.connect() as conn:
+            # Start at 0001
+            cfg_0001 = _make_config(conn)
+            upgrade(cfg_0001, "0001")
+
+            # Upgrade to 0002
+            _apply_0002(conn)
+
+            # Verify columns exist after upgrade
+            txn_cols = _column_names(conn, "transactions")
+            assert "currency" in txn_cols
+
+            rates_cols = _column_names(conn, "rates")
+            assert "fetched_at" in rates_cols
+
+            # Downgrade to 0001
+            _downgrade_0001(conn)
+
+            # Verify columns removed
+            txn_cols = _column_names(conn, "transactions")
+            assert "currency" not in txn_cols
+
+            rates_cols = _column_names(conn, "rates")
+            assert "fetched_at" not in rates_cols
+
+            # Re-upgrade to 0002
+            _apply_0002(conn)
+
+            # Verify columns back
+            txn_cols = _column_names(conn, "transactions")
+            assert "currency" in txn_cols
+
+            rates_cols = _column_names(conn, "rates")
+            assert "fetched_at" in rates_cols
+
+    def test_accounts_check_widened(self) -> None:
+        """Wider CHECK allows new currencies after 0002."""
+        engine = create_engine("sqlite://", poolclass=StaticPool)
+        with engine.connect() as conn:
+            cfg = _make_config(conn)
+            upgrade(cfg, "0001")
+
+            # CAD should fail before 0002
+            with pytest.raises(Exception, match="CHECK"):
+                conn.execute(
+                    text(
+                        "INSERT INTO accounts (name, currency, depth, kind) "
+                        "VALUES (:name, :currency, :depth, :kind)"
+                    ),
+                    {"name": "Expenses:Tesla", "currency": "CAD", "depth": 1, "kind": "Expenses"},
+                )
+
+            _apply_0002(conn)
+
+            # CAD should work after 0002
+            conn.execute(
+                text(
+                    "INSERT INTO accounts (name, currency, depth, kind) "
+                    "VALUES (:name, :currency, :depth, :kind)"
+                ),
+                {"name": "Expenses:Tesla", "currency": "CAD", "depth": 1, "kind": "Expenses"},
+            )
+
+    def test_idx_rates_lookup_exists(self) -> None:
+        """idx_rates_lookup index exists after 0002 upgrade."""
+        engine = create_engine("sqlite://", poolclass=StaticPool)
+        with engine.connect() as conn:
+            cfg = _make_config(conn)
+            upgrade(cfg, "0001")
+            _apply_0002(conn)
+
+            rows = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rates_lookup'")
+            ).fetchall()
+            assert len(rows) == 1
+            assert rows[0][0] == "idx_rates_lookup"

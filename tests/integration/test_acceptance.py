@@ -145,7 +145,7 @@ SCENARIOS: list[tuple[Any, ...]] = [
         id="version-shows",
     ),
     pytest.param(
-        ["migrate", "status"], 0, "0001", _init,
+        ["migrate", "status"], 0, "0002", _init,
         id="migrate-status-shows",
     ),
 ]
