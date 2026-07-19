@@ -1,0 +1,13 @@
+# CODEOWNERS — pull requests touching matched paths auto-request review from these owners.
+# Last match wins (like .gitignore).
+# Single-owner repo: everything routes to the maintainer.
+# ponytail: this exists for review routing once collaborators join.
+
+*                               @JuanSebastianGB
+
+# Hard gate — workflow changes always need eyes.
+/.github/workflows/             @JuanSebastianGB
+
+# Money-touching code demands careful review.
+/src/pyfintracker/models.py      @JuanSebastianGB
+/migrations/                     @JuanSebastianGB
