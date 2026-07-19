@@ -165,6 +165,26 @@ class TestRenderMonthly:
         assert "Expenses" in output
         assert "Net" in output
 
+    def test_currency_tag_in_title_usd(self) -> None:
+        """Non-COP currency shows in title."""
+        from pyfintracker.reports import render_monthly_report
+
+        report = MonthlyReport(
+            year_month="2026-07",
+            income_lines=[],
+            expense_lines=[],
+            income_total=Decimal("0"),
+            expense_total=Decimal("0"),
+            net=Decimal("0"),
+            currency="USD",
+        )
+        buf = StringIO()
+        console = Console(file=buf, width=80, force_terminal=True)
+        render_monthly_report(report, console)
+        output = buf.getvalue()
+
+        assert "(USD)" in output
+
 
 @pytest.mark.snapshot
 class TestRenderBalance:
@@ -299,3 +319,25 @@ class TestRenderBalance:
         output = buf.getvalue()
 
         assert ANSI_RED in output
+
+    def test_currency_tag_euro(self) -> None:
+        """Non-COP currency shows EUR tag in net worth."""
+        from pyfintracker.reports import render_balance
+
+        report = BalanceReport(
+            lines=[
+                BalanceLine(
+                    account_name="Assets:Checking",
+                    account_kind="Assets",
+                    balance=Decimal("100.00"),
+                ),
+            ],
+            net_worth=Decimal("100.00"),
+            currency="EUR",
+        )
+        buf = StringIO()
+        console = Console(file=buf, width=80, force_terminal=True)
+        render_balance(report, console)
+        output = buf.getvalue()
+
+        assert "EUR" in output
