@@ -89,6 +89,7 @@ uv run alembic revision --autogenerate -m "..."  # new migration
 - Don't use SQLAlchemy ORM (only Core — explicit SQL).
 - Don't add FastAPI or any web framework — this is a CLI.
 - Don't publish to PyPI before v1.0 stability.
+- Don't delete the `latest-main` tag — `.github/workflows/sync-main-tag.yml` force-moves it to main's HEAD on every push; deleting it drops the reference pointer the rest of the toolchain can rely on.
 
 <!-- engineering-guidelines -->
 ## Engineering Guidelines (universal — apply to all work)

@@ -1,0 +1,30 @@
+name: Sync main tag
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-main-tag
+  cancel-in-progress: true
+
+jobs:
+  sync-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Force-move latest-main tag to current HEAD
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # ponytail: single tag tracks main; force-move keeps it pointing at HEAD.
+          # ponytail: upgrade path — switch to date+semver tags if releases ever get cut from main.
+          git tag -f latest-main "${{ github.sha }}"
+          git push origin refs/tags/latest-main --force
