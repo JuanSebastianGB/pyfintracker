@@ -6,7 +6,7 @@ fully migrated in-memory SQLite database with the 0001 schema + starter chart.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest

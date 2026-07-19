@@ -267,6 +267,7 @@ class TestRate:
         """Rate minimal construction."""
         from datetime import date
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56"))
@@ -282,6 +283,7 @@ class TestRate:
         """Rate.rate is Decimal type (float enforced by mypy)."""
         from datetime import date
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("3255.56"))
@@ -291,6 +293,7 @@ class TestRate:
         """Rate is immutable after construction."""
         from datetime import date
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         r = Rate(date=date(2026, 7, 18), from_ccy="USD", to_ccy="COP", rate=Decimal("1"))
@@ -301,6 +304,7 @@ class TestRate:
         """to_row maps from_ccy→base_currency, to_ccy→target_currency."""
         from datetime import date, datetime
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         r = Rate(
@@ -323,6 +327,7 @@ class TestRate:
         """Rate.from_row(to_row()) preserves all fields byte-exact."""
         from datetime import date, datetime
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         original = Rate(
@@ -342,6 +347,7 @@ class TestRate:
         """from_row works without id (None on insert)."""
         from datetime import date
         from decimal import Decimal
+
         from pyfintracker.models import Rate
 
         row = {
