@@ -238,6 +238,67 @@ class Rate:
 
 
 @dataclass(frozen=True, slots=True)
+class Budget:
+    """A spending budget with period, scope, and limit.
+
+    Frozen dataclass — fields are immutable after construction.
+    ``account_id`` may be None (all accounts); ``tag_id`` may be None (all tags).
+    """
+
+    id: int | None = None
+    name: str = ""
+    amount: Decimal = Decimal("0")
+    currency: str = "COP"
+    period: str = "monthly"
+    account_id: int | None = None
+    tag_id: int | None = None
+    start_date: str = ""
+    is_active: bool = True
+    created_at: str = ""
+
+    def __post_init__(self) -> None:
+        if self.period not in ("monthly", "yearly"):
+            raise ValueError(f"period must be 'monthly' or 'yearly', got '{self.period}'")
+        if self.amount < Decimal("0"):
+            raise ValueError(f"amount must be non-negative, got {self.amount}")
+
+    def to_row(self) -> dict[str, object]:
+        """Convert to dict for SQLAlchemy Core insertion."""
+        d: dict[str, object] = {
+            "name": self.name,
+            "amount": str(self.amount),
+            "currency": self.currency,
+            "period": self.period,
+            "start_date": self.start_date,
+            "is_active": 1 if self.is_active else 0,
+        }
+        if self.id is not None:
+            d["id"] = self.id
+        if self.account_id is not None:
+            d["account_id"] = self.account_id
+        if self.tag_id is not None:
+            d["tag_id"] = self.tag_id
+        return d
+
+    @staticmethod
+    def from_row(row: Any) -> Budget:
+        """Reconstruct from a SQLAlchemy result row."""
+        raw: dict[str, Any] = dict(getattr(row, "_mapping", row))
+        return Budget(
+            id=int(raw["id"]) if raw.get("id") is not None else None,
+            name=str(raw["name"]),
+            amount=Decimal(str(raw.get("amount", "0"))),
+            currency=str(raw.get("currency", "COP")),
+            period=str(raw["period"]),
+            account_id=int(raw["account_id"]) if raw.get("account_id") is not None else None,
+            tag_id=int(raw["tag_id"]) if raw.get("tag_id") is not None else None,
+            start_date=str(raw["start_date"]),
+            is_active=bool(raw.get("is_active", 1)),
+            created_at=str(raw.get("created_at", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RecurringRule:
     """A recurring transaction rule.
 
@@ -381,6 +442,7 @@ def compute_next_date(current_iso: str, frequency: str, /) -> str:
 __all__ = [
     "ROOT_TYPES",
     "Account",
+    "Budget",
     "Posting",
     "Rate",
     "RecurringPosting",
