@@ -57,7 +57,7 @@ def test_migrate_down_up(tmp_path: Path, cli_runner: CliRunner) -> None:
                 " AND name NOT LIKE 'alembic_%' AND name != 'sqlite_sequence'"
             )
         ).fetchall()
-    assert len(tables) == 4, f"Expected 4 tables after re-upgrade, got {len(tables)}"
+    assert len(tables) == 6, f"Expected 6 tables after re-upgrade, got {len(tables)}"
 
 
 def test_migrate_invalid_action(tmp_path: Path, cli_runner: CliRunner) -> None:

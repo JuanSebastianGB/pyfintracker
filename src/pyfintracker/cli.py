@@ -31,7 +31,7 @@ from pyfintracker.exceptions import (
 )
 from pyfintracker.fx import convert as fx_convert
 from pyfintracker.fx import get_rate as fx_get_rate
-from pyfintracker.models import Account, Posting, Transaction
+from pyfintracker.models import Account, Posting, Tag, Transaction
 from pyfintracker.reports import (
     compute_balance,
     compute_monthly_report,
@@ -41,9 +41,15 @@ from pyfintracker.reports import (
 from pyfintracker.repository import (
     create_account,
     create_opening_balance_transaction,
+    create_tag,
     create_transaction_with_postings,
+    delete_tag,
     get_account_by_name,
+    get_tag_by_name,
     list_accounts,
+    list_tags,
+    tag_transaction,
+    untag_transaction,
 )
 from pyfintracker.validation import (
     validate_account_name,
@@ -51,6 +57,7 @@ from pyfintracker.validation import (
     validate_currency,
     validate_date,
     validate_description,
+    validate_tag_name,
 )
 
 __version__ = pkg_version("pyfintracker")
@@ -72,6 +79,11 @@ app.add_typer(account_app, name="account")
 
 report_app = typer.Typer(help="Financial reports.")
 app.add_typer(report_app, name="report")
+
+# ── Tag sub-app ────────────────────────────────────────────────────────────
+
+tag_app = typer.Typer(help="Manage tags.")
+app.add_typer(tag_app, name="tag")
 
 
 @app.callback(invoke_without_command=True)
@@ -321,6 +333,7 @@ def _add_flag_mode(
     amount: str,
     currency: str,
     description: str,
+    tags: list[str] | None = None,
 ) -> None:
     """Add a transaction from explicit CLI flags (non-interactive)."""
     try:
@@ -359,10 +372,24 @@ def _add_flag_mode(
 
             txn_id = create_transaction_with_postings(conn, txn, postings)
 
-        console.print(
+            # Attach tags
+            if tags:
+                for tag_name in tags:
+                    validated_tag = validate_tag_name(tag_name)
+                    tag = get_tag_by_name(conn, validated_tag)
+                    if tag is None:
+                        console.print(f"[red]Error:[/red] Tag '{tag_name}' not found")
+                        raise typer.Exit(code=1)
+                    assert tag.id is not None
+                    tag_transaction(conn, txn_id, tag.id)
+
+        msg = (
             f"[green]✓[/green] Transaction #{txn_id}: {description} "
             f"({validated_amount} {validated_currency})"
         )
+        if tags:
+            msg += f" tags: {', '.join(tags)}"
+        console.print(msg)
 
     except (FinanceError, ValueError) as e:
         if isinstance(e, FinanceError):
@@ -408,6 +435,7 @@ def add(
     amount: str | None = typer.Option(None, "--amount", help="Amount to transfer"),
     currency: str = typer.Option("COP", "--currency", help="Currency"),
     description: str | None = typer.Option(None, "--description", help="Transaction description"),
+    tags: list[str] | None = typer.Option(None, "--tag", help="Tag(s) to attach (repeatable)"),  # noqa: B008
 ) -> None:
     """Add a transaction. Use flags for direct entry, or omit flags for REPL."""
     flag_args = [from_account, to_account, amount, description]
@@ -430,7 +458,7 @@ def add(
     assert amount is not None
     assert description is not None
 
-    _add_flag_mode(from_account, to_account, amount, currency, description)
+    _add_flag_mode(from_account, to_account, amount, currency, description, tags=tags)
 
 
 # ── Report sub-app commands ──────────────────────────────────────────────────
@@ -502,6 +530,183 @@ def balance(
         )
 
     render_balance(report, console)
+
+
+# ── Tag sub-app commands ─────────────────────────────────────────────────
+
+
+def _resolve_account_id(engine: Engine, name: str) -> int | None:
+    """Resolve an account name to its id.  Returns None if not found."""
+    with engine.connect() as conn:
+        acct = get_account_by_name(conn, name)
+        return acct.id if acct else None
+
+
+@tag_app.command("create")
+def tag_create(
+    name: str = typer.Argument(..., help="Tag name"),
+    account: str | None = typer.Option(None, "--account", help="Optional account scope"),
+) -> None:
+    """Create a new tag."""
+    try:
+        validated = validate_tag_name(name)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        account_id: int | None = None
+        if account:
+            acct = _resolve_account_id(engine, account)
+            if acct is None:
+                console.print(f"[red]Error:[/red] Account '{account}' not found")
+                raise typer.Exit(code=1)
+            account_id = acct
+
+        with engine.begin() as conn:
+            tag = create_tag(conn, Tag(name=validated, account_id=account_id))
+        console.print(
+            f"[green]✓[/green] Tag '{tag.name}' created (id={tag.id})"
+        )
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+
+@tag_app.command("list")
+def tag_list(
+    account: str | None = typer.Option(None, "--account", help="Filter by account"),
+) -> None:
+    """List all tags."""
+    engine = _get_engine()
+    try:
+        account_id: int | None = None
+        if account:
+            acct = _resolve_account_id(engine, account)
+            if acct is None:
+                console.print(f"[red]Error:[/red] Account '{account}' not found")
+                raise typer.Exit(code=1)
+            account_id = acct
+
+        with engine.connect() as conn:
+            tags = list_tags(conn, account_id=account_id)
+
+        if not tags:
+            console.print("No tags found.")
+            return
+
+        from rich.table import Table
+
+        table = Table(title="Tags")
+        table.add_column("ID", style="dim")
+        table.add_column("Name", style="cyan")
+        table.add_column("Account ID")
+        table.add_column("Created")
+        for t in tags:
+            table.add_row(
+                str(t.id or ""),
+                t.name,
+                str(t.account_id or ""),
+                t.created_at,
+            )
+        console.print(table)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+
+@tag_app.command("delete")
+def tag_delete(
+    name: str = typer.Argument(..., help="Tag name to delete"),
+    account: str | None = typer.Option(None, "--account", help="Account scope"),
+) -> None:
+    """Delete a tag by name."""
+    try:
+        validated = validate_tag_name(name)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        account_id: int | None = None
+        if account:
+            acct = _resolve_account_id(engine, account)
+            if acct is None:
+                console.print(f"[red]Error:[/red] Account '{account}' not found")
+                raise typer.Exit(code=1)
+            account_id = acct
+
+        with engine.begin() as conn:
+            tag = get_tag_by_name(conn, validated, account_id=account_id)
+            if tag is None:
+                console.print(f"[red]Error:[/red] Tag '{name}' not found")
+                raise typer.Exit(code=1)
+            assert tag.id is not None
+            delete_tag(conn, tag.id)
+        console.print(f"[green]✓[/green] Tag '{name}' deleted")
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+
+@tag_app.command("add")
+def tag_add(
+    tag_name: str = typer.Argument(..., help="Tag name"),
+    transaction_id: int = typer.Argument(..., help="Transaction ID"),
+) -> None:
+    """Tag an existing transaction."""
+    try:
+        validated = validate_tag_name(tag_name)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            tag = get_tag_by_name(conn, validated)
+            if tag is None:
+                console.print(f"[red]Error:[/red] Tag '{tag_name}' not found")
+                raise typer.Exit(code=1)
+            assert tag.id is not None
+            tag_transaction(conn, transaction_id, tag.id)
+        console.print(
+            f"[green]✓[/green] Tag '{tag_name}' added to transaction #{transaction_id}"
+        )
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
+
+
+@tag_app.command("remove")
+def tag_remove(
+    tag_name: str = typer.Argument(..., help="Tag name"),
+    transaction_id: int = typer.Argument(..., help="Transaction ID"),
+) -> None:
+    """Remove a tag from a transaction."""
+    try:
+        validated = validate_tag_name(tag_name)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            tag = get_tag_by_name(conn, validated)
+            if tag is None:
+                console.print(f"[red]Error:[/red] Tag '{tag_name}' not found")
+                raise typer.Exit(code=1)
+            assert tag.id is not None
+            untag_transaction(conn, transaction_id, tag.id)
+        console.print(
+            f"[green]✓[/green] Tag '{tag_name}' removed from transaction #{transaction_id}"
+        )
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=e.code) from None
 
 
 def _parse_repl_amount(raw: str) -> Decimal:
@@ -647,6 +852,97 @@ def _run_alembic(engine: Engine, action: str, revision: str) -> None:
             downgrade(alembic_cfg, revision)
 
 
+# ── Register command ────────────────────────────────────────────────────────────
+
+
+@app.command()
+def register(
+    description: str = typer.Argument(..., help="Transaction description"),
+    amount: str = typer.Argument(..., help="Amount"),
+    account: str = typer.Option(..., "--account", "-a", help="Account name"),
+    currency: str = typer.Option("COP", "--currency", "-c", help="Currency ISO code"),
+    date_str: str = typer.Option("", "--date", help="Transaction date (YYYY-MM-DD)"),
+    tags: list[str] = typer.Option([], "--tag", help="Tags to attach (repeat or comma-separated)"),  # noqa: B008
+) -> None:
+    """Register a transaction with optional tags.
+
+    Creates a balanced transaction debiting the given account and crediting
+    Equity:Registered (auto-created).  Attaches any specified tags.
+    """
+    try:
+        validated_currency = validate_currency(currency)
+        validated_amount = validate_amount(amount, validated_currency)
+        validated_description = validate_description(description)
+        account_name = validate_account_name(account)
+        txn_date: date = date.today()
+        if date_str:
+            txn_date = validate_date(date_str)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=1) from None
+
+    # Parse tags list — support both --tag t1 --tag t2 and --tag "t1,t2"
+    parsed_tags: list[str] = []
+    for t in tags:
+        for part in t.split(","):
+            part = part.strip()
+            if part:
+                try:
+                    parsed_tags.append(validate_tag_name(part))
+                except ValueError as e:
+                    console.print(f"[red]Error:[/red] {e}")
+                    raise typer.Exit(code=1) from None
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            src = get_account_by_name(conn, account_name)
+            if src is None:
+                _render_error(AccountNotFoundError(f"Account '{account_name}' not found"), console)
+                raise typer.Exit(code=1)
+            assert src.id is not None
+
+            # Get or create the equity counterpart
+            equity = get_account_by_name(conn, "Equity:Registered")
+            if equity is None:
+                equity = create_account(
+                    conn,
+                    Account(name="Equity:Registered", currency=validated_currency, depth=1, kind="Equity"),
+                )
+            assert equity.id is not None
+
+            txn = Transaction(
+                date=txn_date,
+                description=validated_description,
+                currency=validated_currency,
+            )
+            postings = [
+                Posting(account_id=src.id, amount=validated_amount, currency=validated_currency),
+                Posting(account_id=equity.id, amount=-validated_amount, currency=validated_currency),
+            ]
+
+            txn_id = create_transaction_with_postings(conn, txn, postings)
+
+            # Attach tags
+            for tag_name in parsed_tags:
+                tag = create_tag(conn, Tag(name=tag_name))
+                assert tag.id is not None
+                tag_transaction(conn, txn_id, tag.id)
+
+            tag_msg = f" with tags: {', '.join(parsed_tags)}" if parsed_tags else ""
+            console.print(
+                f"[green]✓[/green] Transaction #{txn_id}: {validated_description} "
+                f"({validated_amount} {validated_currency}){tag_msg}"
+            )
+
+    except (FinanceError, ValueError) as e:
+        if isinstance(e, FinanceError):
+            _render_error(e, console)
+        else:
+            console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=getattr(e, "code", 1)) from None
+
+
 __all__ = [
     "account_app",
     "add",
@@ -655,8 +951,15 @@ __all__ = [
     "config_show",
     "init",
     "migrate",
+    "register",
     "repl_add_postings",
     "report_app",
     "report_month",
+    "tag_add",
+    "tag_app",
+    "tag_create",
+    "tag_delete",
+    "tag_list",
+    "tag_remove",
     "version",
 ]

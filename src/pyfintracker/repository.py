@@ -14,8 +14,8 @@ from typing import Any
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
-from pyfintracker.models import Account, Posting, Rate, Transaction
-from pyfintracker.validation import validate_account_name, validate_transaction
+from pyfintracker.models import Account, Posting, Rate, Tag, Transaction
+from pyfintracker.validation import validate_account_name, validate_tag_name, validate_transaction
 
 
 def create_account(conn: Connection, account: Account) -> Account:
@@ -284,16 +284,131 @@ def list_cached_rates(
     return [_row_to_rate(row) for row in rows]
 
 
+# ── Tag repository functions ──────────────────────────────────────────────────
+
+
+def create_tag(conn: Connection, tag: Tag) -> Tag:
+    """Insert a new tag.  Returns the Tag with its generated id.
+
+    Raises:
+        ValueError: if the tag name is invalid.
+        ValidationError: if the tag name already exists (UNIQUE constraint).
+    """
+    validate_tag_name(tag.name)
+    try:
+        row = conn.execute(
+            text("""
+                INSERT INTO tags (name, account_id)
+                VALUES (:name, :account_id)
+                RETURNING id, name, account_id, created_at
+            """),
+            {"name": tag.name, "account_id": tag.account_id},
+        ).fetchone()
+        assert row is not None
+        return Tag(id=row[0], name=row[1], account_id=row[2], created_at=row[3])
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            from pyfintracker.exceptions import ValidationError
+
+            raise ValidationError(f"Tag '{tag.name}' already exists") from None
+        raise
+
+
+def get_tag_by_name(
+    conn: Connection,
+    name: str,
+    account_id: int | None = None,
+) -> Tag | None:
+    """Look up a tag by name, optionally filtering by account.
+
+    Returns the Tag or ``None`` if not found.
+    """
+    if account_id is not None:
+        row = conn.execute(
+            text("SELECT * FROM tags WHERE name = :name AND account_id = :aid"),
+            {"name": name, "aid": account_id},
+        ).fetchone()
+    else:
+        row = conn.execute(
+            text("SELECT * FROM tags WHERE name = :name"),
+            {"name": name},
+        ).fetchone()
+    if row is None:
+        return None
+    return Tag(id=row[0], name=row[1], account_id=row[2], created_at=row[3])
+
+
+def list_tags(conn: Connection, account_id: int | None = None) -> list[Tag]:
+    """Return all tags, optionally filtered by account.  Ordered by name."""
+    if account_id is not None:
+        rows = conn.execute(
+            text("SELECT * FROM tags WHERE account_id = :aid ORDER BY name"),
+            {"aid": account_id},
+        ).fetchall()
+    else:
+        rows = conn.execute(text("SELECT * FROM tags ORDER BY name")).fetchall()
+    return [Tag(id=r[0], name=r[1], account_id=r[2], created_at=r[3]) for r in rows]
+
+
+def delete_tag(conn: Connection, tag_id: int) -> None:
+    """Delete a tag by id.  Also removes junction rows via CASCADE."""
+    conn.execute(text("DELETE FROM tags WHERE id = :id"), {"id": tag_id})
+
+
+def tag_transaction(conn: Connection, transaction_id: int, tag_id: int) -> None:
+    """Attach a tag to a transaction.  Idempotent (no-op on duplicate)."""
+    conn.execute(
+        text("""
+            INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id)
+            VALUES (:txn_id, :tag_id)
+        """),
+        {"txn_id": transaction_id, "tag_id": tag_id},
+    )
+
+
+def untag_transaction(conn: Connection, transaction_id: int, tag_id: int) -> None:
+    """Remove a tag from a transaction."""
+    conn.execute(
+        text("""
+            DELETE FROM transaction_tags
+            WHERE transaction_id = :txn_id AND tag_id = :tag_id
+        """),
+        {"txn_id": transaction_id, "tag_id": tag_id},
+    )
+
+
+def get_transaction_tags(conn: Connection, transaction_id: int) -> list[Tag]:
+    """Return all tags attached to a transaction."""
+    rows = conn.execute(
+        text("""
+            SELECT t.id, t.name, t.account_id, t.created_at
+            FROM tags t
+            JOIN transaction_tags tt ON tt.tag_id = t.id
+            WHERE tt.transaction_id = :txn_id
+            ORDER BY t.name
+        """),
+        {"txn_id": transaction_id},
+    ).fetchall()
+    return [Tag(id=r[0], name=r[1], account_id=r[2], created_at=r[3]) for r in rows]
+
+
 __all__ = [
     "account_has_postings",
     "create_account",
     "create_opening_balance_transaction",
+    "create_tag",
     "create_transaction_with_postings",
+    "delete_tag",
     "get_account_by_id",
     "get_account_by_name",
     "get_cached_rate",
+    "get_tag_by_name",
+    "get_transaction_tags",
     "list_accounts",
     "list_cached_rates",
+    "list_tags",
+    "tag_transaction",
+    "untag_transaction",
     "upsert_account",
     "upsert_rate",
 ]

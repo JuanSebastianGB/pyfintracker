@@ -38,7 +38,7 @@ def test_init_runs_migrations(tmp_path: Path, cli_runner: CliRunner) -> None:
                 " AND name NOT LIKE 'alembic_%' AND name != 'sqlite_sequence'"
             )
         ).fetchall()
-    assert len(tables) == 4, f"Expected 4 tables, got {len(tables)}: {[r[0] for r in tables]}"
+    assert len(tables) == 6, f"Expected 6 tables, got {len(tables)}: {[r[0] for r in tables]}"
 
 
 def test_init_seeds_chart(tmp_path: Path, cli_runner: CliRunner) -> None:

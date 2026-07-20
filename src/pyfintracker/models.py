@@ -132,6 +132,39 @@ class Transaction:
 
 
 @dataclass(frozen=True, slots=True)
+class Tag:
+    """A tag for categorising transactions.
+
+    ``account_id`` may be None for global tags usable on any transaction.
+    """
+
+    id: int | None = None
+    name: str = ""
+    account_id: int | None = None
+    created_at: str = ""
+
+    def to_row(self) -> dict[str, object]:
+        """Convert to dict for SQLAlchemy Core insertion."""
+        d: dict[str, object] = {"name": self.name}
+        if self.id is not None:
+            d["id"] = self.id
+        if self.account_id is not None:
+            d["account_id"] = self.account_id
+        return d
+
+    @staticmethod
+    def from_row(row: object) -> Tag:
+        """Reconstruct from a SQLAlchemy result row."""
+        raw: Any = getattr(row, "_mapping", row)
+        return Tag(
+            id=int(raw["id"]) if raw.get("id") is not None else 0,
+            name=str(raw["name"]),
+            account_id=int(raw["account_id"]) if raw.get("account_id") is not None else None,
+            created_at=str(raw.get("created_at", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Rate:
     """An FX rate between two currencies.
 
@@ -204,5 +237,6 @@ __all__ = [
     "Account",
     "Posting",
     "Rate",
+    "Tag",
     "Transaction",
 ]
