@@ -201,6 +201,20 @@ def validate_description(desc: str) -> str:
     return desc
 
 
+def validate_tag_name(tag: str) -> str:
+    """Validate and normalize a tag name.
+
+    Strips whitespace and lowercases.  Rejects empty names and names
+    containing commas (reserved for multi-tag syntax).
+    """
+    tag = tag.strip().lower()
+    if not tag:
+        raise ValueError("Tag name must not be empty")
+    if "," in tag:
+        raise ValueError("Tag name must not contain commas (reserved for multi-tag syntax)")
+    return tag
+
+
 __all__ = [
     "ACCOUNT_NAME_RE",
     "PER_CURRENCY_DECIMALS",
@@ -212,5 +226,6 @@ __all__ = [
     "validate_date",
     "validate_description",
     "validate_posting",
+    "validate_tag_name",
     "validate_transaction",
 ]
