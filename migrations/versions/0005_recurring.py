@@ -59,6 +59,7 @@ def _create_recurring_postings() -> None:
 
 
 def upgrade() -> None:
+    _ = revision, down_revision, branch_labels, depends_on  # alembic reads globals via reflection
     _create_recurring_rules()
     _create_recurring_postings()
 

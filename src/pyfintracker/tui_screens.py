@@ -149,6 +149,8 @@ class DashboardScreen(Widget):
                 report = compute_balance(c, as_of=as_of)
                 nw = report.net_worth
             except Exception:
+                # Historical-month failures fall back to 0 so the trend
+                # chart still renders; details are not actionable here.
                 pass
             trend.append((calendar.month_abbr[m], nw))
 
@@ -213,6 +215,8 @@ class DashboardScreen(Widget):
                     recent_rows.append((txn, row))
                     txn_ids.append(row.id)
         except Exception:
+            # Recent-transactions lookup is a non-essential dashboard panel;
+            # surface an empty list rather than crashing the whole screen.
             pass
 
         # ── budgets ───────────────────────────────────────────────────────
@@ -223,6 +227,8 @@ class DashboardScreen(Widget):
                 spent = get_budget_spending(c, b, today.isoformat())
                 budget_data.append((b.name, b.amount, spent))
         except Exception:
+            # Budgets are an optional dashboard panel; render nothing
+            # rather than tearing down the rest of the dashboard.
             pass
 
         return {
@@ -448,6 +454,8 @@ class DrilldownScreen(ModalScreen[None]):
                 tag_objs = get_transaction_tags(conn, self._txn_id)
                 tags = [t.name for t in tag_objs]
             except Exception:
+                # Tags feature may be absent on older schemas; the modal
+                # still renders the transaction details without them.
                 pass
 
         yield Static(self._render_detail(txn, postings, tags), id="drilldown-box")

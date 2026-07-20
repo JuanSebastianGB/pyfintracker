@@ -21,6 +21,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    _ = revision, down_revision, branch_labels, depends_on  # alembic reads globals via reflection
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS budgets (
