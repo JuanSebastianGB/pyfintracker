@@ -14,7 +14,16 @@ from typing import Any
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
-from pyfintracker.models import Account, Posting, Rate, Tag, Transaction
+from pyfintracker.models import (
+    Account,
+    Posting,
+    Rate,
+    RecurringPosting,
+    RecurringRule,
+    Tag,
+    Transaction,
+    compute_next_date,
+)
 from pyfintracker.validation import validate_account_name, validate_tag_name, validate_transaction
 
 
@@ -419,16 +428,183 @@ def search_transactions(conn: Connection, query: str, limit: int = 20) -> list[T
     return [Transaction.from_row(r) for r in rows]
 
 
+# ── Recurring rule repository functions ────────────────────────────────────
+
+
+def create_recurring_rule(
+    conn: Connection,
+    rule: RecurringRule,
+    postings: Sequence[RecurringPosting],
+) -> RecurringRule:
+    """Create a recurring rule and its posting templates atomically.
+
+    Returns the ``RecurringRule`` with its generated ``id`` populated.
+    """
+    params = rule.to_row()
+    params.pop("id", None)
+
+    row = conn.execute(
+        text("""
+            INSERT INTO recurring_rules
+                (name, description, frequency, interval_days,
+                 day_of_month, day_of_week, start_date, end_date, next_date, is_active)
+            VALUES
+                (:name, :description, :frequency, :interval_days,
+                 :day_of_month, :day_of_week, :start_date, :end_date, :next_date, :is_active)
+            RETURNING id
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    rule_id: int = row[0]
+
+    for p in postings:
+        p_params = p.to_row()
+        p_params.pop("id", None)
+        p_params["rule_id"] = rule_id
+        conn.execute(
+            text("""
+                INSERT INTO recurring_postings (rule_id, account_id, amount, currency)
+                VALUES (:rule_id, :account_id, :amount, :currency)
+            """),
+            p_params,
+        )
+
+    return RecurringRule(
+        id=rule_id,
+        name=rule.name,
+        description=rule.description,
+        frequency=rule.frequency,
+        interval_days=rule.interval_days,
+        day_of_month=rule.day_of_month,
+        day_of_week=rule.day_of_week,
+        start_date=rule.start_date,
+        end_date=rule.end_date,
+        next_date=rule.next_date,
+        is_active=rule.is_active,
+        created_at="",
+    )
+
+
+def get_recurring_rules(conn: Connection) -> list[RecurringRule]:
+    """Return all recurring rules ordered by name."""
+    rows = conn.execute(
+        text("SELECT * FROM recurring_rules ORDER BY name"),
+    ).fetchall()
+    return [RecurringRule.from_row(r) for r in rows]
+
+
+def get_recurring_rule(conn: Connection, rule_id: int) -> RecurringRule | None:
+    """Look up a recurring rule by id.  Returns ``None`` if not found."""
+    row = conn.execute(
+        text("SELECT * FROM recurring_rules WHERE id = :id"),
+        {"id": rule_id},
+    ).fetchone()
+    return RecurringRule.from_row(row) if row else None
+
+
+def get_recurring_rule_postings(conn: Connection, rule_id: int) -> list[RecurringPosting]:
+    """Return all posting templates for a recurring rule."""
+    rows = conn.execute(
+        text("SELECT * FROM recurring_postings WHERE rule_id = :rid ORDER BY id"),
+        {"rid": rule_id},
+    ).fetchall()
+    return [RecurringPosting.from_row(r) for r in rows]
+
+
+def update_recurring_rule(conn: Connection, rule: RecurringRule) -> None:
+    """Update an existing recurring rule's mutable fields."""
+    assert rule.id is not None, "Cannot update a rule without an id"
+    conn.execute(
+        text("""
+            UPDATE recurring_rules SET
+                name = :name,
+                description = :description,
+                frequency = :frequency,
+                interval_days = :interval_days,
+                day_of_month = :day_of_month,
+                day_of_week = :day_of_week,
+                start_date = :start_date,
+                end_date = :end_date,
+                next_date = :next_date,
+                is_active = :is_active
+            WHERE id = :id
+        """),
+        rule.to_row(),
+    )
+
+
+def delete_recurring_rule(conn: Connection, rule_id: int) -> None:
+    """Delete a recurring rule and its postings (CASCADE)."""
+    conn.execute(text("DELETE FROM recurring_rules WHERE id = :id"), {"id": rule_id})
+
+
+def get_due_recurring_rules(conn: Connection, as_of_date: str) -> list[RecurringRule]:
+    """Return active rules whose ``next_date`` is on or before ``as_of_date``."""
+    rows = conn.execute(
+        text("""
+            SELECT * FROM recurring_rules
+            WHERE next_date <= :as_of AND is_active = 1
+            ORDER BY name
+        """),
+        {"as_of": as_of_date},
+    ).fetchall()
+    return [RecurringRule.from_row(r) for r in rows]
+
+
+def set_next_date(conn: Connection, rule_id: int, next_date: str) -> None:
+    """Update the ``next_date`` of a recurring rule."""
+    conn.execute(
+        text("UPDATE recurring_rules SET next_date = :nd WHERE id = :id"),
+        {"nd": next_date, "id": rule_id},
+    )
+
+
+def advance_recurring_rule(conn: Connection, rule_id: int, frequency: str) -> None:
+    """Advance ``next_date`` by one period according to ``frequency``.
+
+    Also checks ``end_date``: if the new next_date is past end_date,
+    the rule is deactivated (``is_active = 0``).
+    """
+    row = conn.execute(
+        text("SELECT next_date, end_date FROM recurring_rules WHERE id = :id"),
+        {"id": rule_id},
+    ).fetchone()
+    assert row is not None
+    current_next = str(row[0])
+    end_date: str | None = str(row[1]) if row[1] else None
+
+    new_next = compute_next_date(current_next, frequency)
+
+    if end_date is not None and new_next > end_date:
+        conn.execute(
+            text("UPDATE recurring_rules SET is_active = 0 WHERE id = :id"),
+            {"id": rule_id},
+        )
+    else:
+        conn.execute(
+            text("UPDATE recurring_rules SET next_date = :nd WHERE id = :id"),
+            {"nd": new_next, "id": rule_id},
+        )
+
+
 __all__ = [
     "account_has_postings",
+    "advance_recurring_rule",
     "create_account",
     "create_opening_balance_transaction",
+    "create_recurring_rule",
     "create_tag",
     "create_transaction_with_postings",
+    "delete_recurring_rule",
     "delete_tag",
     "get_account_by_id",
     "get_account_by_name",
     "get_cached_rate",
+    "get_due_recurring_rules",
+    "get_recurring_rule",
+    "get_recurring_rule_postings",
+    "get_recurring_rules",
     "get_tag_by_name",
     "get_transaction_tags",
     "list_accounts",
@@ -436,6 +612,7 @@ __all__ = [
     "list_tags",
     "rebuild_fts",
     "search_transactions",
+    "set_next_date",
     "tag_transaction",
     "untag_transaction",
     "upsert_account",

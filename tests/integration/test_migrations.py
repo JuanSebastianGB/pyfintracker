@@ -83,14 +83,14 @@ class TestMigrationSchema:
         return create_engine("sqlite://", poolclass=StaticPool)
 
     def test_upgrade_creates_six_tables(self) -> None:
-        """After upgrade(head), 7 user tables exist."""
+        """After upgrade(head), 9 user tables exist."""
         engine = self._engine()
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 7, (
-                "Expected 7 tables (accounts, transactions, postings, rates, tags, "
-                "transaction_tags, transactions_fts)"
+            assert _count_tables(conn) == 9, (
+                "Expected 9 tables (accounts, transactions, postings, rates, tags, "
+                "transaction_tags, transactions_fts, recurring_rules, recurring_postings)"
             )
             # Verify FTS5 virtual table exists
             assert _table_exists(conn, "transactions_fts")
@@ -171,13 +171,9 @@ class TestMigrationSchema:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 7
+            assert _count_tables(conn) == 9
             downgrade(cfg, "base")
             assert _count_tables(conn) == 0, "All user tables should be dropped"
-
-
-# ── T-1.6: Starter chart (11 accounts) ──────────────────────────────────────
-
 
 @pytest.mark.integration
 class TestStarterChart:
@@ -231,7 +227,7 @@ class TestMigrationSmoke:
             upgrade(cfg, "head")
             downgrade(cfg, "base")
             upgrade(cfg, "head")  # second upgrade must succeed
-            assert _count_tables(conn) == 7
+            assert _count_tables(conn) == 9
 
     def test_upgrade_downgrade_upgrade_starter_chart_persists(self) -> None:
         """After triple cycle, 11 accounts still present."""
@@ -254,7 +250,7 @@ class TestMigrationSmoke:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 7, "Expected 7 tables after first upgrade"
+            assert _count_tables(conn) == 9, "Expected 9 tables after first upgrade"
 
         with engine.connect() as conn:
             cfg = _make_config(conn)
@@ -264,7 +260,7 @@ class TestMigrationSmoke:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 7, "Expected 7 tables after re-upgrade"
+            assert _count_tables(conn) == 9, "Expected 9 tables after re-upgrade"
 
         # Verify starter chart is present
         with engine.connect() as conn:

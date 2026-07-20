@@ -40,7 +40,7 @@ def test_init_runs_migrations(tmp_path: Path, cli_runner: CliRunner) -> None:
                 " AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\'"
             )
         ).fetchall()
-    assert len(tables) == 7, f"Expected 7 tables, got {len(tables)}: {[r[0] for r in tables]}"
+    assert len(tables) == 9, f"Expected 9 tables, got {len(tables)}: {[r[0] for r in tables]}"
 
 
 def test_init_seeds_chart(tmp_path: Path, cli_runner: CliRunner) -> None:

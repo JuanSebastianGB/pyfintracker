@@ -31,7 +31,7 @@ from pyfintracker.exceptions import (
 )
 from pyfintracker.fx import convert as fx_convert
 from pyfintracker.fx import get_rate as fx_get_rate
-from pyfintracker.models import Account, Posting, Tag, Transaction
+from pyfintracker.models import Account, Posting, RecurringPosting, RecurringRule, Tag, Transaction
 from pyfintracker.reports import (
     compute_balance,
     compute_monthly_report,
@@ -39,12 +39,19 @@ from pyfintracker.reports import (
     render_monthly_report,
 )
 from pyfintracker.repository import (
+    advance_recurring_rule,
     create_account,
     create_opening_balance_transaction,
+    create_recurring_rule,
     create_tag,
     create_transaction_with_postings,
+    delete_recurring_rule,
     delete_tag,
     get_account_by_name,
+    get_due_recurring_rules,
+    get_recurring_rule,
+    get_recurring_rule_postings,
+    get_recurring_rules,
     get_tag_by_name,
     list_accounts,
     list_tags,
@@ -85,6 +92,11 @@ app.add_typer(report_app, name="report")
 
 tag_app = typer.Typer(help="Manage tags.")
 app.add_typer(tag_app, name="tag")
+
+# ── Recurring sub-app ──────────────────────────────────────────────────────
+
+recurring_app = typer.Typer(help="Manage recurring transaction rules.")
+app.add_typer(recurring_app, name="recurring")
 
 
 @app.callback(invoke_without_command=True)
@@ -1002,6 +1014,229 @@ def register(
         raise typer.Exit(code=getattr(e, "code", 1)) from None
 
 
+# ── Recurring sub-app commands ─────────────────────────────────────────────
+
+
+@recurring_app.command("create")
+def recurring_create(
+    name: str = typer.Argument(..., help="Rule name"),
+    frequency: str = typer.Argument(..., help="Frequency: daily|weekly|monthly|yearly"),
+    amount: str = typer.Argument(..., help="Amount per posting"),
+    account: str = typer.Argument(..., help="Account name for the posting"),
+    description: str = typer.Option("", "--description", "-d", help="Rule description"),
+    start_date: str = typer.Option("", "--start-date", help="Start date (YYYY-MM-DD, default: today)"),
+    end_date: str | None = typer.Option(None, "--end-date", help="End date (YYYY-MM-DD, optional)"),
+    currency: str = typer.Option("COP", "--currency", "-c", help="Currency ISO code"),
+) -> None:
+    """Create a recurring rule with one posting template.
+
+    The rule will generate transactions automatically via ``fin recurring generate``.
+    """
+    valid_frequencies = ("daily", "weekly", "monthly", "yearly")
+    if frequency not in valid_frequencies:
+        console.print(
+            f"[red]Error:[/red] Invalid frequency '{frequency}'. "
+            f"Must be one of {', '.join(valid_frequencies)}."
+        )
+        raise typer.Exit(code=1)
+
+    engine = _get_engine()
+    try:
+        validated_currency = validate_currency(currency)
+        validated_amount = validate_amount(amount, validated_currency)
+        validated_account = validate_account_name(account)
+
+        txn_date: str
+        if start_date:
+            validate_date(start_date)
+            txn_date = start_date
+        else:
+            txn_date = date.today().isoformat()
+
+        if end_date:
+            validate_date(end_date)
+
+        with engine.begin() as conn:
+            # Resolve the account
+            src = get_account_by_name(conn, validated_account)
+            if src is None:
+                _render_error(
+                    AccountNotFoundError(f"Account '{validated_account}' not found"), console
+                )
+                raise typer.Exit(code=1)
+            assert src.id is not None
+
+            rule = RecurringRule(
+                name=name,
+                description=description,
+                frequency=frequency,
+                start_date=txn_date,
+                next_date=txn_date,
+                end_date=end_date if end_date else None,
+                is_active=True,
+            )
+            posting = RecurringPosting(
+                account_id=src.id,
+                amount=validated_amount,
+                currency=validated_currency,
+            )
+            created = create_recurring_rule(conn, rule, [posting])
+
+        console.print(
+            f"[green]✓[/green] Recurring rule #{created.id} '{name}' created "
+            f"({frequency}, {validated_amount} {validated_currency})"
+        )
+
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=1) from None
+
+
+@recurring_app.command("list")
+def recurring_list() -> None:
+    """List all recurring rules."""
+    engine = _get_engine()
+    with engine.connect() as conn:
+        rules = get_recurring_rules(conn)
+
+    if not rules:
+        console.print("No recurring rules found.")
+        return
+
+    table = Table(title="Recurring Rules")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Frequency", style="yellow")
+    table.add_column("Next Date", style="green")
+    table.add_column("Active", style="blue")
+    table.add_column("Description")
+    for r in rules:
+        active = "[green]✓[/green]" if r.is_active else "[red]✗[/red]"
+        table.add_row(
+            str(r.id or ""),
+            r.name,
+            r.frequency,
+            r.next_date,
+            active,
+            r.description,
+        )
+    console.print(table)
+
+
+@recurring_app.command("due")
+def recurring_due(
+    date_str: str = typer.Option("", "--date", "-d", help="Check date (YYYY-MM-DD, default: today)"),
+) -> None:
+    """List recurring rules that are due on or before a given date."""
+    as_of: str = date_str if date_str else date.today().isoformat()
+
+    engine = _get_engine()
+    with engine.connect() as conn:
+        rules = get_due_recurring_rules(conn, as_of)
+
+    if not rules:
+        console.print(f"No rules due on or before {as_of}.")
+        return
+
+    table = Table(title=f"Due Recurring Rules (as of {as_of})")
+    table.add_column("ID", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Frequency", style="yellow")
+    table.add_column("Next Date", style="green")
+    for r in rules:
+        table.add_row(
+            str(r.id or ""),
+            r.name,
+            r.frequency,
+            r.next_date,
+        )
+    console.print(table)
+
+
+@recurring_app.command("generate")
+def recurring_generate(
+    date_str: str = typer.Option("", "--date", "-d", help="Generation date (YYYY-MM-DD, default: today)"),
+) -> None:
+    """Generate transactions for all due recurring rules.
+
+    For each due rule, creates one balanced transaction with the rule's
+    postings, then advances the rule's ``next_date``.  Each rule is processed
+    atomically: all-or-nothing within a single rule.
+    """
+    as_of: str = date_str if date_str else date.today().isoformat()
+
+    engine = _get_engine()
+    generated = 0
+
+    with engine.begin() as conn:
+        rules = get_due_recurring_rules(conn, as_of)
+
+        for rule in rules:
+            assert rule.id is not None
+            postings = get_recurring_rule_postings(conn, rule.id)
+
+            if not postings:
+                continue
+
+            # Build a balanced transaction: the rule's postings sum to zero
+            # by creating an offsetting Equity:Registered posting if needed.
+            txn_postings: list[Posting] = []
+            for rp in postings:
+                txn_postings.append(
+                    Posting(
+                        account_id=rp.account_id,
+                        amount=rp.amount,
+                        currency=rp.currency,
+                    )
+                )
+
+            total = sum(p.amount for p in txn_postings)
+            if total != Decimal("0"):
+                # Add offsetting posting to Equity:Registered
+                equity = get_account_by_name(conn, "Equity:Registered")
+                if equity is None:
+                    eq_currency = postings[0].currency if postings else "COP"
+                    validate_currency(eq_currency)
+                    equity = create_account(
+                        conn,
+                        Account(name="Equity:Registered", currency=eq_currency, depth=1, kind="Equity"),
+                    )
+                assert equity is not None and equity.id is not None
+                txn_postings.append(
+                    Posting(account_id=equity.id, amount=Decimal(-total), currency=postings[0].currency),
+                )
+
+            txn = Transaction(
+                date=date.fromisoformat(as_of),
+                description=f"Recurring: {rule.name}",
+            )
+            create_transaction_with_postings(conn, txn, txn_postings)
+
+            # Advance next_date (deactivates if past end_date)
+            advance_recurring_rule(conn, rule.id, rule.frequency)
+            generated += 1
+
+    if generated:
+        console.print(f"[green]✓[/green] Generated {generated} transaction(s) from recurring rules.")
+    else:
+        console.print("No due rules to generate transactions for.")
+
+
+@recurring_app.command("delete")
+def recurring_delete(
+    rule_id: int = typer.Argument(..., help="Rule ID to delete"),
+) -> None:
+    """Delete a recurring rule and its posting templates."""
+    engine = _get_engine()
+    with engine.begin() as conn:
+        rule = get_recurring_rule(conn, rule_id)
+        if rule is None:
+            console.print(f"[red]Error:[/red] Rule #{rule_id} not found.")
+            raise typer.Exit(code=1)
+        delete_recurring_rule(conn, rule_id)
+    console.print(f"[green]✓[/green] Recurring rule #{rule_id} deleted.")
+
+
 __all__ = [
     "account_app",
     "add",
@@ -1010,6 +1245,7 @@ __all__ = [
     "config_show",
     "init",
     "migrate",
+    "recurring_app",
     "register",
     "repl_add_postings",
     "report_app",
