@@ -19,11 +19,19 @@ def _make_config(connection: Connection) -> Config:
 
 
 def _count_tables(conn: Connection) -> int:
-    """Return the number of user tables in the database."""
+    """Return the number of user tables in the database.
+
+    Excludes Alembic's internal table, ``sqlite_sequence``, and FTS5
+    shadow tables (``transactions_fts_%``) so the expected count stays
+    stable as migrations add virtual tables.
+    """
     row = conn.execute(
         text(
             "SELECT count(*) FROM sqlite_master "
-            "WHERE type='table' AND name NOT LIKE 'alembic_%' AND name != 'sqlite_sequence'"
+            "WHERE type='table'"
+            " AND name NOT LIKE 'alembic_%'"
+            " AND name != 'sqlite_sequence'"
+            " AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\'"
         )
     ).scalar()
     return row or 0
@@ -75,14 +83,17 @@ class TestMigrationSchema:
         return create_engine("sqlite://", poolclass=StaticPool)
 
     def test_upgrade_creates_six_tables(self) -> None:
-        """After upgrade(head), 6 user tables exist."""
+        """After upgrade(head), 10 user tables exist."""
         engine = self._engine()
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 6, (
-                "Expected 6 tables (accounts, transactions, postings, rates, tags, transaction_tags)"
+            assert _count_tables(conn) == 10, (
+                "Expected 10 tables (accounts, transactions, postings, rates, tags, "
+                "transaction_tags, transactions_fts, recurring_rules, recurring_postings, budgets)"
             )
+            # Verify FTS5 virtual table exists
+            assert _table_exists(conn, "transactions_fts")
 
     def test_accounts_table_columns(self) -> None:
         """accounts table has the expected columns."""
@@ -160,13 +171,9 @@ class TestMigrationSchema:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 6
+            assert _count_tables(conn) == 10
             downgrade(cfg, "base")
             assert _count_tables(conn) == 0, "All user tables should be dropped"
-
-
-# ── T-1.6: Starter chart (11 accounts) ──────────────────────────────────────
-
 
 @pytest.mark.integration
 class TestStarterChart:
@@ -220,7 +227,7 @@ class TestMigrationSmoke:
             upgrade(cfg, "head")
             downgrade(cfg, "base")
             upgrade(cfg, "head")  # second upgrade must succeed
-            assert _count_tables(conn) == 6
+            assert _count_tables(conn) == 10
 
     def test_upgrade_downgrade_upgrade_starter_chart_persists(self) -> None:
         """After triple cycle, 11 accounts still present."""
@@ -243,7 +250,7 @@ class TestMigrationSmoke:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 6, "Expected 6 tables after first upgrade"
+            assert _count_tables(conn) == 10, "Expected 10 tables after first upgrade"
 
         with engine.connect() as conn:
             cfg = _make_config(conn)
@@ -253,7 +260,7 @@ class TestMigrationSmoke:
         with engine.connect() as conn:
             cfg = _make_config(conn)
             upgrade(cfg, "head")
-            assert _count_tables(conn) == 6, "Expected 6 tables after re-upgrade"
+            assert _count_tables(conn) == 10, "Expected 10 tables after re-upgrade"
 
         # Verify starter chart is present
         with engine.connect() as conn:
