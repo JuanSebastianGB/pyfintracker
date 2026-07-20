@@ -1246,6 +1246,18 @@ def budget_delete(
     console.print(f"[green]✓[/green] Budget #{budget_id} deleted.")
 
 
+@app.command()
+def tui(
+    db_path: str | None = typer.Option(
+        None, "--db", help="Database path (default: XDG data dir)"
+    ),
+) -> None:
+    """Launch the Textual TUI browser."""
+    from pyfintracker.tui import run_tui
+
+    run_tui(db_path)
+
+
 # ── Recurring sub-app commands ─────────────────────────────────────────────
 
 
