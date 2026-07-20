@@ -48,6 +48,7 @@ from pyfintracker.repository import (
     get_tag_by_name,
     list_accounts,
     list_tags,
+    search_transactions,
     tag_transaction,
     untag_transaction,
 )
@@ -170,6 +171,64 @@ def convert(
 def version() -> None:
     """Show the installed version."""
     typer.echo(f"pyfintracker v{__version__}")
+
+
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="Search query (FTS5 syntax)"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max results"),
+) -> None:
+    """Search transactions by description.
+
+    Uses FTS5 full-text search supporting AND/OR, quoted phrases,
+    and prefix matching.  Example queries:\n
+    \b
+    fin search coffee
+    fin search "café latte"
+    fin search coffee AND groceries
+    fin search "coffee*"
+    """
+    engine = _get_engine()
+    with engine.connect() as conn:
+        results = search_transactions(conn, query, limit=limit)
+
+        if not results:
+            console.print("No matching transactions found.")
+            return
+
+        table = Table(title=f"Search results for '{query}'")
+        table.add_column("ID", style="dim")
+        table.add_column("Date", style="cyan")
+        table.add_column("Description", style="white")
+        table.add_column("Account", style="yellow")
+        table.add_column("Amount", style="green")
+        table.add_column("Currency", style="blue")
+
+        for txn in results:
+            assert txn.id is not None
+            row = conn.execute(
+                text("""
+                    SELECT a.name, p.amount
+                    FROM postings p
+                    JOIN accounts a ON a.id = p.account_id
+                    WHERE p.transaction_id = :tid
+                    LIMIT 1
+                """),
+                {"tid": txn.id},
+            ).fetchone()
+            account_name = row[0] if row else ""
+            amount = row[1] if row else ""
+
+            table.add_row(
+                str(txn.id),
+                str(txn.date or ""),
+                txn.description,
+                account_name,
+                amount,
+                txn.currency,
+            )
+
+        console.print(table)
 
 
 @app.command()
@@ -955,6 +1014,7 @@ __all__ = [
     "repl_add_postings",
     "report_app",
     "report_month",
+    "search",
     "tag_add",
     "tag_app",
     "tag_create",

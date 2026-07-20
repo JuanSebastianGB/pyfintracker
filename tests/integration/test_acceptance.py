@@ -208,7 +208,7 @@ SCENARIOS: list[tuple[Any, ...]] = [
     pytest.param(
         ["migrate", "status"],
         0,
-        "0003",
+        "0004",
         _init,
         id="migrate-status-shows",
     ),

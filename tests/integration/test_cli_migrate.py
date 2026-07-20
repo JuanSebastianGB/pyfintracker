@@ -49,15 +49,17 @@ def test_migrate_down_up(tmp_path: Path, cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(app, ["migrate", "up", "head"], env={"FIN_DB_PATH": str(db_path)})
     assert result.exit_code == 0, result.stderr
 
-    # Verify 4 tables are back
+    # Verify tables are back
     with engine.connect() as conn:
         tables = conn.execute(
             text(
                 "SELECT name FROM sqlite_master WHERE type='table'"
-                " AND name NOT LIKE 'alembic_%' AND name != 'sqlite_sequence'"
+                " AND name NOT LIKE 'alembic_%'"
+                " AND name != 'sqlite_sequence'"
+                " AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\'"
             )
         ).fetchall()
-    assert len(tables) == 6, f"Expected 6 tables after re-upgrade, got {len(tables)}"
+    assert len(tables) == 7, f"Expected 7 tables after re-upgrade, got {len(tables)}"
 
 
 def test_migrate_invalid_action(tmp_path: Path, cli_runner: CliRunner) -> None:

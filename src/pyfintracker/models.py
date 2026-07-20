@@ -121,13 +121,17 @@ class Transaction:
         return d
 
     @staticmethod
-    def from_row(row: Mapping[str, Any]) -> Transaction:
-        """Reconstruct from a SQLAlchemy result row."""
+    def from_row(row: Any) -> Transaction:
+        """Reconstruct from a SQLAlchemy result row.
+
+        Accepts a Row, RowMapping, or plain dict.
+        """
+        data: dict[str, Any] = dict(getattr(row, "_mapping", row))
         return Transaction(
-            id=row.get("id"),
-            date=row["date"],
-            description=row["description"],
-            currency=row.get("currency", "COP"),
+            id=data.get("id"),
+            date=data["date"],
+            description=data["description"],
+            currency=data.get("currency", "COP"),
         )
 
 

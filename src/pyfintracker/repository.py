@@ -392,6 +392,33 @@ def get_transaction_tags(conn: Connection, transaction_id: int) -> list[Tag]:
     return [Tag(id=r[0], name=r[1], account_id=r[2], created_at=r[3]) for r in rows]
 
 
+# ── Search repository functions ──────────────────────────────────────────────
+
+
+def rebuild_fts(conn: Connection) -> None:
+    """Rebuild the FTS5 index (used after bulk import)."""
+    conn.execute(text("INSERT INTO transactions_fts(transactions_fts) VALUES('rebuild')"))
+
+
+def search_transactions(conn: Connection, query: str, limit: int = 20) -> list[Transaction]:
+    """Full-text search over transaction descriptions.
+
+    Returns matching transactions ordered by FTS relevance, up to ``limit``.
+    """
+    rows = conn.execute(
+        text("""
+            SELECT t.id, t.date, t.description, t.currency
+            FROM transactions t
+            JOIN transactions_fts fts ON t.id = fts.rowid
+            WHERE transactions_fts MATCH :query
+            ORDER BY rank
+            LIMIT :limit
+        """),
+        {"query": query, "limit": limit},
+    ).fetchall()
+    return [Transaction.from_row(r) for r in rows]
+
+
 __all__ = [
     "account_has_postings",
     "create_account",
@@ -407,6 +434,8 @@ __all__ = [
     "list_accounts",
     "list_cached_rates",
     "list_tags",
+    "rebuild_fts",
+    "search_transactions",
     "tag_transaction",
     "untag_transaction",
     "upsert_account",
