@@ -31,7 +31,15 @@ from pyfintracker.exceptions import (
 )
 from pyfintracker.fx import convert as fx_convert
 from pyfintracker.fx import get_rate as fx_get_rate
-from pyfintracker.models import Account, Posting, RecurringPosting, RecurringRule, Tag, Transaction
+from pyfintracker.models import (
+    Account,
+    Budget,
+    Posting,
+    RecurringPosting,
+    RecurringRule,
+    Tag,
+    Transaction,
+)
 from pyfintracker.reports import (
     compute_balance,
     compute_monthly_report,
@@ -41,13 +49,18 @@ from pyfintracker.reports import (
 from pyfintracker.repository import (
     advance_recurring_rule,
     create_account,
+    create_budget,
     create_opening_balance_transaction,
     create_recurring_rule,
     create_tag,
     create_transaction_with_postings,
+    delete_budget,
     delete_recurring_rule,
     delete_tag,
     get_account_by_name,
+    get_budget,
+    get_budget_spending,
+    get_budgets,
     get_due_recurring_rules,
     get_recurring_rule,
     get_recurring_rule_postings,
@@ -92,6 +105,11 @@ app.add_typer(report_app, name="report")
 
 tag_app = typer.Typer(help="Manage tags.")
 app.add_typer(tag_app, name="tag")
+
+# ── Budget sub-app ─────────────────────────────────────────────────────────
+
+budget_app = typer.Typer(help="Manage spending budgets.")
+app.add_typer(budget_app, name="budget")
 
 # ── Recurring sub-app ──────────────────────────────────────────────────────
 
@@ -1014,6 +1032,220 @@ def register(
         raise typer.Exit(code=getattr(e, "code", 1)) from None
 
 
+# ── Budget sub-app commands ──────────────────────────────────────────────
+
+
+def _budget_spending_bar(spent: Decimal, limit: Decimal) -> str:
+    """Return a color-coded progress bar string.
+
+    Green (<80%), yellow (80-100%), red (>100%).
+    """
+    if limit <= Decimal("0"):
+        return "[dim]N/A[/dim]"
+
+    pct = (spent / limit) * 100
+    bar_len = 20
+    filled = min(int(pct / 100 * bar_len), bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
+
+    if pct < 80:
+        return f"[green]{bar}[/green]"
+    if pct < 100:
+        return f"[yellow]{bar}[/yellow]"
+    return f"[red]{bar}[/red]"
+
+
+def _budget_pct_color(spent: Decimal, limit: Decimal) -> str:
+    """Return a style string for the percentage column."""
+    if limit <= Decimal("0"):
+        return "dim"
+    pct = (spent / limit) * 100
+    if pct < 80:
+        return "green"
+    if pct < 100:
+        return "yellow"
+    return "red"
+
+
+def _budget_scope_str(budget: Budget) -> str:
+    """Return a string describing the budget's scope."""
+    parts: list[str] = []
+    if budget.account_id is not None:
+        parts.append(f"acct#{budget.account_id}")
+    if budget.tag_id is not None:
+        parts.append(f"tag#{budget.tag_id}")
+    return ", ".join(parts) if parts else "all"
+
+
+@budget_app.command("create")
+def budget_create(
+    name: str = typer.Argument(..., help="Budget name"),
+    amount: str = typer.Argument(..., help="Budget limit amount"),
+    currency: str = typer.Option("COP", "--currency", "-c", help="Currency ISO code"),
+    period: str = typer.Option("monthly", "--period", "-p", help="Period: monthly or yearly"),
+    account_id: int | None = typer.Option(None, "--account", "-a", help="Account ID scope"),
+    tag_id: int | None = typer.Option(None, "--tag", "-t", help="Tag ID scope"),
+    start_date: str = typer.Option("", "--start-date", help="Start date (YYYY-MM-DD, default: today)"),
+) -> None:
+    """Create a new spending budget."""
+    if period not in ("monthly", "yearly"):
+        console.print(f"[red]Error:[/red] Invalid period '{period}'. Must be 'monthly' or 'yearly'.")
+        raise typer.Exit(code=1)
+
+    try:
+        validated_amount = validate_amount(amount, currency)
+        validated_currency = validate_currency(currency)
+    except FinanceError as e:
+        _render_error(e, console)
+        raise typer.Exit(code=1) from None
+
+    if not start_date:
+        start_date = date.today().isoformat()
+    else:
+        try:
+            validate_date(start_date)
+        except FinanceError as e:
+            _render_error(e, console)
+            raise typer.Exit(code=1) from None
+
+    budget = Budget(
+        name=name,
+        amount=validated_amount,
+        currency=validated_currency,
+        period=period,
+        account_id=account_id,
+        tag_id=tag_id,
+        start_date=start_date,
+        is_active=True,
+    )
+
+    engine = _get_engine()
+    try:
+        with engine.begin() as conn:
+            created = create_budget(conn, budget)
+        console.print(
+            f"[green]✓[/green] Budget #{created.id} '{name}' created "
+            f"({validated_amount} {validated_currency}/{period})"
+        )
+    except (FinanceError, ValueError) as e:
+        if isinstance(e, FinanceError):
+            _render_error(e, console)
+        else:
+            console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1) from None
+
+
+@budget_app.command("list")
+def budget_list() -> None:
+    """List all budgets with spending vs limit."""
+    engine = _get_engine()
+    with engine.connect() as conn:
+        budgets = get_budgets(conn)
+
+        if not budgets:
+            from rich.text import Text
+
+            console.print(Text("No budgets found.", style="dim"))
+            return
+
+        table = Table(title="Budgets")
+        table.add_column("ID", style="dim")
+        table.add_column("Name", style="cyan")
+        table.add_column("Scope")
+        table.add_column("Period", style="blue")
+        table.add_column("Spent", style="yellow")
+        table.add_column("Limit", style="green")
+        table.add_column("Progress", width=24)
+
+        today = date.today().isoformat()
+        for b in budgets:
+            spent = get_budget_spending(conn, b, today)
+            bar = _budget_spending_bar(spent, b.amount)
+            scope = _budget_scope_str(b)
+            table.add_row(
+                str(b.id or ""),
+                b.name,
+                scope,
+                b.period,
+                f"{spent:f}",
+                f"{b.amount:f}",
+                bar,
+            )
+    console.print(table)
+
+
+@budget_app.command("report")
+def budget_report(
+    month: str = typer.Option("", "--month", help="Month in YYYY-MM format (default: current)"),
+) -> None:
+    """Show detailed budget status for a given month."""
+    year_month = month
+    if not year_month:
+        today = date.today()
+        year_month = f"{today.year}-{today.month:02d}"
+    elif not re.match(r"^\d{4}-\d{2}$", year_month):
+        _render_error(
+            InvalidDate(f"Invalid month format '{year_month}'. Expected YYYY-MM."), console
+        )
+        raise typer.Exit(code=1)
+
+    as_of_date = f"{year_month}-28"  # safe for month extraction
+    engine = _get_engine()
+    with engine.connect() as conn:
+        budgets = get_budgets(conn)
+
+        if not budgets:
+            console.print("[dim]No budgets found.[/dim]")
+            return
+
+        table = Table(title=f"Budget Report — {year_month}")
+        table.add_column("Name", style="cyan")
+        table.add_column("Scope")
+        table.add_column("Period", style="blue")
+        table.add_column("Spent", style="yellow")
+        table.add_column("Limit", style="green")
+        table.add_column("Remaining")
+        table.add_column("%", justify="right")
+
+        for b in budgets:
+            spent = get_budget_spending(conn, b, as_of_date)
+            remaining = max(b.amount - spent, Decimal("0"))
+            if b.amount > Decimal("0"):
+                pct = (spent / b.amount) * 100
+                pct_str = f"{pct:.1f}%"
+            else:
+                pct_str = "N/A"
+            pct_style = _budget_pct_color(spent, b.amount)
+            scope = _budget_scope_str(b)
+            remaining_style = "red" if remaining <= Decimal("0") else "green"
+
+            table.add_row(
+                b.name,
+                scope,
+                b.period,
+                f"{spent:f}",
+                f"{b.amount:f}",
+                f"[{remaining_style}]{remaining:f}[/{remaining_style}]",
+                f"[{pct_style}]{pct_str}[/{pct_style}]",
+            )
+    console.print(table)
+
+
+@budget_app.command("delete")
+def budget_delete(
+    budget_id: int = typer.Argument(..., help="Budget ID to delete"),
+) -> None:
+    """Delete a budget."""
+    engine = _get_engine()
+    with engine.begin() as conn:
+        existing = get_budget(conn, budget_id)
+        if existing is None:
+            console.print(f"[red]Error:[/red] Budget #{budget_id} not found.")
+            raise typer.Exit(code=1)
+        delete_budget(conn, budget_id)
+    console.print(f"[green]✓[/green] Budget #{budget_id} deleted.")
+
+
 # ── Recurring sub-app commands ─────────────────────────────────────────────
 
 
@@ -1242,6 +1474,7 @@ __all__ = [
     "add",
     "app",
     "balance",
+    "budget_app",
     "config_show",
     "init",
     "migrate",

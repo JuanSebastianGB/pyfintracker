@@ -16,6 +16,7 @@ from sqlalchemy import Connection, text
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
 from pyfintracker.models import (
     Account,
+    Budget,
     Posting,
     Rate,
     RecurringPosting,
@@ -588,18 +589,165 @@ def advance_recurring_rule(conn: Connection, rule_id: int, frequency: str) -> No
         )
 
 
+# ── Budget repository functions ────────────────────────────────────────────
+
+
+def create_budget(conn: Connection, budget: Budget) -> Budget:
+    """Insert a new budget.  Returns the Budget with its generated id."""
+    params = budget.to_row()
+    params.pop("id", None)
+    params.setdefault("account_id", None)
+    params.setdefault("tag_id", None)
+
+    row = conn.execute(
+        text("""
+            INSERT INTO budgets (name, amount, currency, period, account_id, tag_id, start_date, is_active)
+            VALUES (:name, :amount, :currency, :period, :account_id, :tag_id, :start_date, :is_active)
+            RETURNING id, created_at
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    return Budget(
+        id=row[0],
+        name=budget.name,
+        amount=budget.amount,
+        currency=budget.currency,
+        period=budget.period,
+        account_id=budget.account_id,
+        tag_id=budget.tag_id,
+        start_date=budget.start_date,
+        is_active=budget.is_active,
+        created_at=str(row[1]),
+    )
+
+
+def get_budgets(conn: Connection) -> list[Budget]:
+    """Return all budgets ordered by name."""
+    rows = conn.execute(
+        text("SELECT * FROM budgets ORDER BY name"),
+    ).fetchall()
+    return [Budget.from_row(r) for r in rows]
+
+
+def get_budget(conn: Connection, budget_id: int) -> Budget | None:
+    """Look up a budget by id.  Returns ``None`` if not found."""
+    row = conn.execute(
+        text("SELECT * FROM budgets WHERE id = :id"),
+        {"id": budget_id},
+    ).fetchone()
+    return Budget.from_row(row) if row else None
+
+
+def update_budget(conn: Connection, budget: Budget) -> None:
+    """Update an existing budget's mutable fields."""
+    assert budget.id is not None, "Cannot update a budget without an id"
+    conn.execute(
+        text("""
+            UPDATE budgets SET
+                name = :name,
+                amount = :amount,
+                currency = :currency,
+                period = :period,
+                account_id = :account_id,
+                tag_id = :tag_id,
+                start_date = :start_date,
+                is_active = :is_active
+            WHERE id = :id
+        """),
+        budget.to_row(),
+    )
+
+
+def delete_budget(conn: Connection, budget_id: int) -> None:
+    """Delete a budget by id."""
+    conn.execute(text("DELETE FROM budgets WHERE id = :id"), {"id": budget_id})
+
+
+def get_budget_spending(conn: Connection, budget: Budget, as_of_date: str) -> Decimal:
+    """Calculate total absolute spending applicable to a budget.
+
+    Sums posting amounts (as absolute values) where:
+    - If budget has an ``account_id``, filters postings to that account.
+    - If budget has a ``tag_id``, filters through ``transaction_tags`` join.
+    - Transaction date falls within the budget's period
+      (same YYYY-MM for monthly, same YYYY for yearly).
+
+    Returns total absolute spending as a non-negative Decimal.
+    """
+    assert budget.start_date, "budget must have a start_date"
+
+    if budget.period == "monthly":
+        # as_of_date must be YYYY-MM-DD; extract YYYY-MM
+        year_month = as_of_date[:7]  # "YYYY-MM"
+        date_start = f"{year_month}-01"
+        # compute last day of month
+        y, m = int(year_month[:4]), int(year_month[5:7])
+        date_end = f"{y + 1}-01-01" if m == 12 else f"{y:04d}-{m + 1:02d}-01"
+    elif budget.period == "yearly":
+        year = as_of_date[:4]
+        date_start = f"{year}-01-01"
+        date_end = f"{int(year) + 1}-01-01"
+    else:
+        return Decimal("0")
+
+    conditions: list[str] = [
+        "t.date >= :date_start",
+        "t.date < :date_end",
+    ]
+    params: dict[str, object] = {
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+
+    joins: list[str] = ["JOIN transactions t ON t.id = p.transaction_id"]
+
+    if budget.account_id is not None:
+        conditions.append("p.account_id = :account_id")
+        params["account_id"] = budget.account_id
+    else:
+        # All-accounts budget: only count positive postings to avoid
+        # double-counting both debit and credit legs of each transaction.
+        conditions.append("p.amount > 0")
+
+    if budget.tag_id is not None:
+        joins.append("JOIN transaction_tags tt ON tt.transaction_id = p.transaction_id")
+        conditions.append("tt.tag_id = :tag_id")
+        params["tag_id"] = budget.tag_id
+
+    where_clause = " AND ".join(conditions)
+    join_clause = " ".join(joins)
+
+    row = conn.execute(
+        text(f"""
+            SELECT COALESCE(SUM(ABS(p.amount)), 0)
+            FROM postings p
+            {join_clause}
+            WHERE {where_clause}
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    return Decimal(str(row[0]))
+
+
 __all__ = [
     "account_has_postings",
     "advance_recurring_rule",
     "create_account",
+    "create_budget",
     "create_opening_balance_transaction",
     "create_recurring_rule",
     "create_tag",
     "create_transaction_with_postings",
+    "delete_budget",
     "delete_recurring_rule",
     "delete_tag",
     "get_account_by_id",
     "get_account_by_name",
+    "get_budget",
+    "get_budget_spending",
+    "get_budgets",
     "get_cached_rate",
     "get_due_recurring_rules",
     "get_recurring_rule",
@@ -615,6 +763,7 @@ __all__ = [
     "set_next_date",
     "tag_transaction",
     "untag_transaction",
+    "update_budget",
     "upsert_account",
     "upsert_rate",
 ]

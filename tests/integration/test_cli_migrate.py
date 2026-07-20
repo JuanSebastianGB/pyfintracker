@@ -59,7 +59,7 @@ def test_migrate_down_up(tmp_path: Path, cli_runner: CliRunner) -> None:
                 " AND name NOT LIKE '%\\_fts\\_%' ESCAPE '\\'"
             )
         ).fetchall()
-    assert len(tables) == 9, f"Expected 9 tables after re-upgrade, got {len(tables)}"
+    assert len(tables) == 10, f"Expected 10 tables after re-upgrade, got {len(tables)}"
 
 
 def test_migrate_invalid_action(tmp_path: Path, cli_runner: CliRunner) -> None:
