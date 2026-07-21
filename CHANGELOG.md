@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/JuanSebastianGB/pyfintracker/compare/v0.1.0...v0.2.0) (2026-07-21)
+
+
+### Features
+
+* **tui:** textual spike — one Dashboard screen + Pilot test ([#23](https://github.com/JuanSebastianGB/pyfintracker/issues/23)) ([4bbd1a7](https://github.com/JuanSebastianGB/pyfintracker/commit/4bbd1a748cee390cb4f9db8e5cfbcae95c0e336f))
+
 ## 0.1.0 (2026-07-19)
 
 
