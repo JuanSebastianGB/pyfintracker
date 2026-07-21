@@ -26,6 +26,8 @@ MODULES: tuple[str, ...] = (
     "reports",
     "fx",
     "validation",
+    "tui",
+    "tui_screens",
 )
 
 

@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "rich>=15.0.0",
     "sqlalchemy>=2.0.51",
+    "textual>=0.5",
     "typer>=0.27.0",
 ]
 
@@ -41,6 +42,7 @@ Issues = "https://github.com/JuanSebastianGB/pyfintracker/issues"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-asyncio>=0.24",
     "pytest-cov>=7.1.0",
     "hypothesis>=6.156.6",
     "syrupy>=5.5.3",
@@ -102,11 +104,13 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-fail-under=70",
 ]
+asyncio_mode = "auto"
 markers = [
     "unit: pure logic tests, no I/O",
     "integration: full DB or CLI roundtrip",
     "property: hypothesis-driven invariant tests",
     "snapshot: report output regression tests",
+    "component: Textual Pilot component tests",
 ]
 
 [tool.coverage.run]

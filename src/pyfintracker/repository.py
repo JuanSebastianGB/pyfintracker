@@ -14,8 +14,18 @@ from typing import Any
 from sqlalchemy import Connection, text
 
 from pyfintracker.exceptions import AccountNotFoundError, ValidationError
-from pyfintracker.models import Account, Posting, Rate, Transaction
-from pyfintracker.validation import validate_account_name, validate_transaction
+from pyfintracker.models import (
+    Account,
+    Budget,
+    Posting,
+    Rate,
+    RecurringPosting,
+    RecurringRule,
+    Tag,
+    Transaction,
+    compute_next_date,
+)
+from pyfintracker.validation import validate_account_name, validate_tag_name, validate_transaction
 
 
 def create_account(conn: Connection, account: Account) -> Account:
@@ -284,16 +294,476 @@ def list_cached_rates(
     return [_row_to_rate(row) for row in rows]
 
 
+# ── Tag repository functions ──────────────────────────────────────────────────
+
+
+def create_tag(conn: Connection, tag: Tag) -> Tag:
+    """Insert a new tag.  Returns the Tag with its generated id.
+
+    Raises:
+        ValueError: if the tag name is invalid.
+        ValidationError: if the tag name already exists (UNIQUE constraint).
+    """
+    validate_tag_name(tag.name)
+    try:
+        row = conn.execute(
+            text("""
+                INSERT INTO tags (name, account_id)
+                VALUES (:name, :account_id)
+                RETURNING id, name, account_id, created_at
+            """),
+            {"name": tag.name, "account_id": tag.account_id},
+        ).fetchone()
+        assert row is not None
+        return Tag(id=row[0], name=row[1], account_id=row[2], created_at=row[3])
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            from pyfintracker.exceptions import ValidationError
+
+            raise ValidationError(f"Tag '{tag.name}' already exists") from None
+        raise
+
+
+def get_tag_by_name(
+    conn: Connection,
+    name: str,
+    account_id: int | None = None,
+) -> Tag | None:
+    """Look up a tag by name, optionally filtering by account.
+
+    Returns the Tag or ``None`` if not found.
+    """
+    if account_id is not None:
+        row = conn.execute(
+            text("SELECT * FROM tags WHERE name = :name AND account_id = :aid"),
+            {"name": name, "aid": account_id},
+        ).fetchone()
+    else:
+        row = conn.execute(
+            text("SELECT * FROM tags WHERE name = :name"),
+            {"name": name},
+        ).fetchone()
+    if row is None:
+        return None
+    return Tag(id=row[0], name=row[1], account_id=row[2], created_at=row[3])
+
+
+def list_tags(conn: Connection, account_id: int | None = None) -> list[Tag]:
+    """Return all tags, optionally filtered by account.  Ordered by name."""
+    if account_id is not None:
+        rows = conn.execute(
+            text("SELECT * FROM tags WHERE account_id = :aid ORDER BY name"),
+            {"aid": account_id},
+        ).fetchall()
+    else:
+        rows = conn.execute(text("SELECT * FROM tags ORDER BY name")).fetchall()
+    return [Tag(id=r[0], name=r[1], account_id=r[2], created_at=r[3]) for r in rows]
+
+
+def delete_tag(conn: Connection, tag_id: int) -> None:
+    """Delete a tag by id.  Also removes junction rows via CASCADE."""
+    conn.execute(text("DELETE FROM tags WHERE id = :id"), {"id": tag_id})
+
+
+def tag_transaction(conn: Connection, transaction_id: int, tag_id: int) -> None:
+    """Attach a tag to a transaction.  Idempotent (no-op on duplicate)."""
+    conn.execute(
+        text("""
+            INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id)
+            VALUES (:txn_id, :tag_id)
+        """),
+        {"txn_id": transaction_id, "tag_id": tag_id},
+    )
+
+
+def untag_transaction(conn: Connection, transaction_id: int, tag_id: int) -> None:
+    """Remove a tag from a transaction."""
+    conn.execute(
+        text("""
+            DELETE FROM transaction_tags
+            WHERE transaction_id = :txn_id AND tag_id = :tag_id
+        """),
+        {"txn_id": transaction_id, "tag_id": tag_id},
+    )
+
+
+def get_transaction_tags(conn: Connection, transaction_id: int) -> list[Tag]:
+    """Return all tags attached to a transaction."""
+    rows = conn.execute(
+        text("""
+            SELECT t.id, t.name, t.account_id, t.created_at
+            FROM tags t
+            JOIN transaction_tags tt ON tt.tag_id = t.id
+            WHERE tt.transaction_id = :txn_id
+            ORDER BY t.name
+        """),
+        {"txn_id": transaction_id},
+    ).fetchall()
+    return [Tag(id=r[0], name=r[1], account_id=r[2], created_at=r[3]) for r in rows]
+
+
+# ── Search repository functions ──────────────────────────────────────────────
+
+
+def rebuild_fts(conn: Connection) -> None:
+    """Rebuild the FTS5 index (used after bulk import)."""
+    conn.execute(text("INSERT INTO transactions_fts(transactions_fts) VALUES('rebuild')"))
+
+
+def search_transactions(conn: Connection, query: str, limit: int = 20) -> list[Transaction]:
+    """Full-text search over transaction descriptions.
+
+    Returns matching transactions ordered by FTS relevance, up to ``limit``.
+    """
+    rows = conn.execute(
+        text("""
+            SELECT t.id, t.date, t.description, t.currency
+            FROM transactions t
+            JOIN transactions_fts fts ON t.id = fts.rowid
+            WHERE transactions_fts MATCH :query
+            ORDER BY rank
+            LIMIT :limit
+        """),
+        {"query": query, "limit": limit},
+    ).fetchall()
+    return [Transaction.from_row(r) for r in rows]
+
+
+# ── Recurring rule repository functions ────────────────────────────────────
+
+
+def create_recurring_rule(
+    conn: Connection,
+    rule: RecurringRule,
+    postings: Sequence[RecurringPosting],
+) -> RecurringRule:
+    """Create a recurring rule and its posting templates atomically.
+
+    Returns the ``RecurringRule`` with its generated ``id`` populated.
+    """
+    params = rule.to_row()
+    params.pop("id", None)
+
+    row = conn.execute(
+        text("""
+            INSERT INTO recurring_rules
+                (name, description, frequency, interval_days,
+                 day_of_month, day_of_week, start_date, end_date, next_date, is_active)
+            VALUES
+                (:name, :description, :frequency, :interval_days,
+                 :day_of_month, :day_of_week, :start_date, :end_date, :next_date, :is_active)
+            RETURNING id
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    rule_id: int = row[0]
+
+    for p in postings:
+        p_params = p.to_row()
+        p_params.pop("id", None)
+        p_params["rule_id"] = rule_id
+        conn.execute(
+            text("""
+                INSERT INTO recurring_postings (rule_id, account_id, amount, currency)
+                VALUES (:rule_id, :account_id, :amount, :currency)
+            """),
+            p_params,
+        )
+
+    return RecurringRule(
+        id=rule_id,
+        name=rule.name,
+        description=rule.description,
+        frequency=rule.frequency,
+        interval_days=rule.interval_days,
+        day_of_month=rule.day_of_month,
+        day_of_week=rule.day_of_week,
+        start_date=rule.start_date,
+        end_date=rule.end_date,
+        next_date=rule.next_date,
+        is_active=rule.is_active,
+        created_at="",
+    )
+
+
+def get_recurring_rules(conn: Connection) -> list[RecurringRule]:
+    """Return all recurring rules ordered by name."""
+    rows = conn.execute(
+        text("SELECT * FROM recurring_rules ORDER BY name"),
+    ).fetchall()
+    return [RecurringRule.from_row(r) for r in rows]
+
+
+def get_recurring_rule(conn: Connection, rule_id: int) -> RecurringRule | None:
+    """Look up a recurring rule by id.  Returns ``None`` if not found."""
+    row = conn.execute(
+        text("SELECT * FROM recurring_rules WHERE id = :id"),
+        {"id": rule_id},
+    ).fetchone()
+    return RecurringRule.from_row(row) if row else None
+
+
+def get_recurring_rule_postings(conn: Connection, rule_id: int) -> list[RecurringPosting]:
+    """Return all posting templates for a recurring rule."""
+    rows = conn.execute(
+        text("SELECT * FROM recurring_postings WHERE rule_id = :rid ORDER BY id"),
+        {"rid": rule_id},
+    ).fetchall()
+    return [RecurringPosting.from_row(r) for r in rows]
+
+
+def update_recurring_rule(conn: Connection, rule: RecurringRule) -> None:
+    """Update an existing recurring rule's mutable fields."""
+    assert rule.id is not None, "Cannot update a rule without an id"
+    conn.execute(
+        text("""
+            UPDATE recurring_rules SET
+                name = :name,
+                description = :description,
+                frequency = :frequency,
+                interval_days = :interval_days,
+                day_of_month = :day_of_month,
+                day_of_week = :day_of_week,
+                start_date = :start_date,
+                end_date = :end_date,
+                next_date = :next_date,
+                is_active = :is_active
+            WHERE id = :id
+        """),
+        rule.to_row(),
+    )
+
+
+def delete_recurring_rule(conn: Connection, rule_id: int) -> None:
+    """Delete a recurring rule and its postings (CASCADE)."""
+    conn.execute(text("DELETE FROM recurring_rules WHERE id = :id"), {"id": rule_id})
+
+
+def get_due_recurring_rules(conn: Connection, as_of_date: str) -> list[RecurringRule]:
+    """Return active rules whose ``next_date`` is on or before ``as_of_date``."""
+    rows = conn.execute(
+        text("""
+            SELECT * FROM recurring_rules
+            WHERE next_date <= :as_of AND is_active = 1
+            ORDER BY name
+        """),
+        {"as_of": as_of_date},
+    ).fetchall()
+    return [RecurringRule.from_row(r) for r in rows]
+
+
+def set_next_date(conn: Connection, rule_id: int, next_date: str) -> None:
+    """Update the ``next_date`` of a recurring rule."""
+    conn.execute(
+        text("UPDATE recurring_rules SET next_date = :nd WHERE id = :id"),
+        {"nd": next_date, "id": rule_id},
+    )
+
+
+def advance_recurring_rule(conn: Connection, rule_id: int, frequency: str) -> None:
+    """Advance ``next_date`` by one period according to ``frequency``.
+
+    Also checks ``end_date``: if the new next_date is past end_date,
+    the rule is deactivated (``is_active = 0``).
+    """
+    row = conn.execute(
+        text("SELECT next_date, end_date FROM recurring_rules WHERE id = :id"),
+        {"id": rule_id},
+    ).fetchone()
+    assert row is not None
+    current_next = str(row[0])
+    end_date: str | None = str(row[1]) if row[1] else None
+
+    new_next = compute_next_date(current_next, frequency)
+
+    if end_date is not None and new_next > end_date:
+        conn.execute(
+            text("UPDATE recurring_rules SET is_active = 0 WHERE id = :id"),
+            {"id": rule_id},
+        )
+    else:
+        conn.execute(
+            text("UPDATE recurring_rules SET next_date = :nd WHERE id = :id"),
+            {"nd": new_next, "id": rule_id},
+        )
+
+
+# ── Budget repository functions ────────────────────────────────────────────
+
+
+def create_budget(conn: Connection, budget: Budget) -> Budget:
+    """Insert a new budget.  Returns the Budget with its generated id."""
+    params = budget.to_row()
+    params.pop("id", None)
+    params.setdefault("account_id", None)
+    params.setdefault("tag_id", None)
+
+    row = conn.execute(
+        text("""
+            INSERT INTO budgets (name, amount, currency, period, account_id, tag_id, start_date, is_active)
+            VALUES (:name, :amount, :currency, :period, :account_id, :tag_id, :start_date, :is_active)
+            RETURNING id, created_at
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    return Budget(
+        id=row[0],
+        name=budget.name,
+        amount=budget.amount,
+        currency=budget.currency,
+        period=budget.period,
+        account_id=budget.account_id,
+        tag_id=budget.tag_id,
+        start_date=budget.start_date,
+        is_active=budget.is_active,
+        created_at=str(row[1]),
+    )
+
+
+def get_budgets(conn: Connection) -> list[Budget]:
+    """Return all budgets ordered by name."""
+    rows = conn.execute(
+        text("SELECT * FROM budgets ORDER BY name"),
+    ).fetchall()
+    return [Budget.from_row(r) for r in rows]
+
+
+def get_budget(conn: Connection, budget_id: int) -> Budget | None:
+    """Look up a budget by id.  Returns ``None`` if not found."""
+    row = conn.execute(
+        text("SELECT * FROM budgets WHERE id = :id"),
+        {"id": budget_id},
+    ).fetchone()
+    return Budget.from_row(row) if row else None
+
+
+def update_budget(conn: Connection, budget: Budget) -> None:
+    """Update an existing budget's mutable fields."""
+    assert budget.id is not None, "Cannot update a budget without an id"
+    conn.execute(
+        text("""
+            UPDATE budgets SET
+                name = :name,
+                amount = :amount,
+                currency = :currency,
+                period = :period,
+                account_id = :account_id,
+                tag_id = :tag_id,
+                start_date = :start_date,
+                is_active = :is_active
+            WHERE id = :id
+        """),
+        budget.to_row(),
+    )
+
+
+def delete_budget(conn: Connection, budget_id: int) -> None:
+    """Delete a budget by id."""
+    conn.execute(text("DELETE FROM budgets WHERE id = :id"), {"id": budget_id})
+
+
+def get_budget_spending(conn: Connection, budget: Budget, as_of_date: str) -> Decimal:
+    """Calculate total absolute spending applicable to a budget.
+
+    Sums posting amounts (as absolute values) where:
+    - If budget has an ``account_id``, filters postings to that account.
+    - If budget has a ``tag_id``, filters through ``transaction_tags`` join.
+    - Transaction date falls within the budget's period
+      (same YYYY-MM for monthly, same YYYY for yearly).
+
+    Returns total absolute spending as a non-negative Decimal.
+    """
+    assert budget.start_date, "budget must have a start_date"
+
+    if budget.period == "monthly":
+        # as_of_date must be YYYY-MM-DD; extract YYYY-MM
+        year_month = as_of_date[:7]  # "YYYY-MM"
+        date_start = f"{year_month}-01"
+        # compute last day of month
+        y, m = int(year_month[:4]), int(year_month[5:7])
+        date_end = f"{y + 1}-01-01" if m == 12 else f"{y:04d}-{m + 1:02d}-01"
+    elif budget.period == "yearly":
+        year = as_of_date[:4]
+        date_start = f"{year}-01-01"
+        date_end = f"{int(year) + 1}-01-01"
+    else:
+        return Decimal("0")
+
+    conditions: list[str] = [
+        "t.date >= :date_start",
+        "t.date < :date_end",
+    ]
+    params: dict[str, object] = {
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+
+    joins: list[str] = ["JOIN transactions t ON t.id = p.transaction_id"]
+
+    if budget.account_id is not None:
+        conditions.append("p.account_id = :account_id")
+        params["account_id"] = budget.account_id
+    else:
+        # All-accounts budget: only count positive postings to avoid
+        # double-counting both debit and credit legs of each transaction.
+        conditions.append("p.amount > 0")
+
+    if budget.tag_id is not None:
+        joins.append("JOIN transaction_tags tt ON tt.transaction_id = p.transaction_id")
+        conditions.append("tt.tag_id = :tag_id")
+        params["tag_id"] = budget.tag_id
+
+    where_clause = " AND ".join(conditions)
+    join_clause = " ".join(joins)
+
+    row = conn.execute(
+        text(f"""
+            SELECT COALESCE(SUM(ABS(p.amount)), 0)
+            FROM postings p
+            {join_clause}
+            WHERE {where_clause}
+        """),
+        params,
+    ).fetchone()
+    assert row is not None
+    return Decimal(str(row[0]))
+
+
 __all__ = [
     "account_has_postings",
+    "advance_recurring_rule",
     "create_account",
+    "create_budget",
     "create_opening_balance_transaction",
+    "create_recurring_rule",
+    "create_tag",
     "create_transaction_with_postings",
+    "delete_budget",
+    "delete_recurring_rule",
+    "delete_tag",
     "get_account_by_id",
     "get_account_by_name",
+    "get_budget",
+    "get_budget_spending",
+    "get_budgets",
     "get_cached_rate",
+    "get_due_recurring_rules",
+    "get_recurring_rule",
+    "get_recurring_rule_postings",
+    "get_recurring_rules",
+    "get_tag_by_name",
+    "get_transaction_tags",
     "list_accounts",
     "list_cached_rates",
+    "list_tags",
+    "rebuild_fts",
+    "search_transactions",
+    "set_next_date",
+    "tag_transaction",
+    "untag_transaction",
+    "update_budget",
     "upsert_account",
     "upsert_rate",
 ]
